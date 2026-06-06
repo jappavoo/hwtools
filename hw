@@ -23,16 +23,16 @@ if [ ! -f /proc/device-tree/model ] || ! grep -q "Raspberry Pi" /proc/device-tre
         fi
         echo "Transferring asset over private network to Pi staging zone..."
         
-        # Connect using the current user's explicit account identity
-        scp "$LOCAL_FILE" "${USER}@${HEAD_NODE}:/tmp/hw-upload-tmp" && \
-        ssh -t "${USER}@${HEAD_NODE}" "hw upload /tmp/hw-upload-tmp $(basename "$LOCAL_FILE")"
+        # Connect using SSH host config mappings
+        scp "$LOCAL_FILE" "${HEAD_NODE}:/tmp/hw-upload-tmp" && \
+        ssh -q -t "${HEAD_NODE}" "hw upload /tmp/hw-upload-tmp $(basename "$LOCAL_FILE")"
         exit $?
     elif [ -z "$COMMAND" ]; then
         # Forward naked list queries cleanly using active user session context
-        exec ssh -t "${USER}@${HEAD_NODE}" "hw"
+        exec ssh -q -t "${HEAD_NODE}" "hw"
     else
         # Forward shortcuts and power actions preserving the explicit username
-        exec ssh -t "${USER}@${HEAD_NODE}" "hw $@"
+        exec ssh -q -t "${HEAD_NODE}" "hw $@"
     fi
     exit 0
 fi
@@ -67,8 +67,43 @@ ensure_user_staging() {
 
 check_status() {
     local line_in=$1
-    CURRENT_STATE=$(gpioget --bias=pull-up $GPIO_CHIP $line_in)
-    if [ "$CURRENT_STATE" -eq 0 ]; then echo "ON"; else echo "OFF"; fi
+    local current_state
+    if ! current_state=$(gpioget --bias=pull-up -c "$GPIO_CHIP" "$line_in" 2>/dev/null); then
+        if ! current_state=$(gpioget --bias=pull-up "$GPIO_CHIP" "$line_in" 2>/dev/null); then
+            echo "UNKNOWN"
+            return 1
+        fi
+    fi
+
+    if [[ "$current_state" =~ ^[01]$ ]]; then
+        if [ "$current_state" -eq 0 ]; then
+            echo "ON"
+        else
+            echo "OFF"
+        fi
+    else
+        echo "UNKNOWN"
+        return 1
+    fi
+}
+
+pulse_power_line() {
+    local line_out=$1
+    local hold_seconds=$2
+
+    if ! gpioset -c "$GPIO_CHIP" "$line_out=1" 2>/dev/null; then
+        if ! gpioset "$GPIO_CHIP" "$line_out=1" 2>/dev/null; then
+            return 1
+        fi
+    fi
+
+    sleep "$hold_seconds"
+
+    if ! gpioset -c "$GPIO_CHIP" "$line_out=0" 2>/dev/null; then
+        if ! gpioset "$GPIO_CHIP" "$line_out=0" 2>/dev/null; then
+            return 1
+        fi
+    fi
 }
 
 wait_for_state() {
@@ -374,9 +409,13 @@ case "$COMMAND" in
             on)
                 STATUS=$(check_status $LINE_IN)
                 if [ "$STATUS" == "ON" ]; then echo "SUCCESS: Already running."; exit 0; fi
+                if [ "$STATUS" == "UNKNOWN" ]; then echo "ERROR: Unable to read host power state."; exit 1; fi
                 ln -sf "$USER_STAGING_DIR/vmlinuz" "$TFTP_PATH/vmlinuz"
                 ln -sf "$USER_STAGING_DIR/initrd.img" "$TFTP_PATH/initrd.img"
-                gpioset $GPIO_CHIP $LINE_OUT=1 && sleep 1 && gpioset $GPIO_CHIP $LINE_OUT=0
+                if ! pulse_power_line "$LINE_OUT" 1; then
+                    echo "ERROR: Unable to control power GPIO line."
+                    exit 1
+                fi
                 if wait_for_state $LINE_IN "ON" $BOOT_TIMEOUT; then
                     echo "SUCCESS: Host booted via TFTP."; exit 0
                 else
@@ -386,7 +425,11 @@ case "$COMMAND" in
             off)
                 STATUS=$(check_status $LINE_IN)
                 if [ "$STATUS" == "OFF" ]; then echo "SUCCESS: Already off."; exit 0; fi
-                gpioset $GPIO_CHIP $LINE_OUT=1 && sleep 1 && gpioset $GPIO_CHIP $LINE_OUT=0
+                if [ "$STATUS" == "UNKNOWN" ]; then echo "ERROR: Unable to read host power state."; exit 1; fi
+                if ! pulse_power_line "$LINE_OUT" 1; then
+                    echo "ERROR: Unable to control power GPIO line."
+                    exit 1
+                fi
                 if wait_for_state $LINE_IN "OFF" $SOFT_OFF_TIMEOUT; then
                     echo "SUCCESS: Graceful power off verified."; exit 0
                 else
@@ -396,7 +439,11 @@ case "$COMMAND" in
             force-off)
                 STATUS=$(check_status $LINE_IN)
                 if [ "$STATUS" == "OFF" ]; then echo "SUCCESS: Already off."; exit 0; fi
-                gpioset $GPIO_CHIP $LINE_OUT=1 && sleep 5 && gpioset $GPIO_CHIP $LINE_OUT=0
+                if [ "$STATUS" == "UNKNOWN" ]; then echo "ERROR: Unable to read host power state."; exit 1; fi
+                if ! pulse_power_line "$LINE_OUT" 5; then
+                    echo "ERROR: Unable to control power GPIO line."
+                    exit 1
+                fi
                 if wait_for_state $LINE_IN "OFF" $HARD_OFF_TIMEOUT; then
                     echo "SUCCESS: Hard cutoff complete."; exit 0
                 else
