@@ -1,0 +1,417 @@
+#!/bin/bash
+# Authored with Google Gemini
+
+# ================================================================================
+# HW: UNIFIED LAB POWER, CONSOLE, AND MULTI-MODE TFTP BOOT MANAGEMENT TOOL
+# ================================================================================
+
+# --- REMOTE WORKSTATION AUTO-DETECTION PHASE ---
+# Change this variable to match your Raspberry Pi's private network domain/IP
+HEAD_NODE="JA-HW-HEAD"
+GRP=plugdev
+
+# Detect if we are running locally on the Raspberry Pi 4 
+if [ ! -f /proc/device-tree/model ] || ! grep -q "Raspberry Pi" /proc/device-tree/model; then
+    # We are running on a user's external workstation. 
+    # SSH dynamically uses the active workstation username ($USER) to connect to the Pi.
+    COMMAND="$1"
+    
+    if [ "$COMMAND" == "upload" ]; then
+        LOCAL_FILE="$2"
+        if [ -z "$LOCAL_FILE" ] || [ ! -f "$LOCAL_FILE" ]; then
+            echo "Error: Please specify a valid local file path to upload."; exit 2
+        fi
+        echo "Transferring asset over private network to Pi staging zone..."
+        
+        # Connect using the current user's explicit account identity
+        scp "$LOCAL_FILE" "${USER}@${HEAD_NODE}:/tmp/hw-upload-tmp" && \
+        ssh -t "${USER}@${HEAD_NODE}" "hw upload /tmp/hw-upload-tmp $(basename "$LOCAL_FILE")"
+        exit $?
+    elif [ -z "$COMMAND" ]; then
+        # Forward naked list queries cleanly using active user session context
+        exec ssh -t "${USER}@${HEAD_NODE}" "hw"
+    else
+        # Forward shortcuts and power actions preserving the explicit username
+        exec ssh -t "${USER}@${HEAD_NODE}" "hw $@"
+    fi
+    exit 0
+fi
+# --- END WORKSTATION REDIRECTION PHASE (Execution below only runs on the Pi) ---
+
+# 1. HARDWARE & PATH CONFIGURATION
+GPIO_CHIP="gpiochip0"
+BASE_TFTP_DIR="/srv/tftp"
+LOG_DIR="/var/log/serial"
+
+# ASSOCIATIVE ARRAY CONFIGURATION
+declare -A SYSTEM_MAP
+SYSTEM_MAP["vic1"]="18:24:ttyVIC1:$BASE_TFTP_DIR/vic1"
+SYSTEM_MAP["vic2"]="19:25:ttyVIC2:$BASE_TFTP_DIR/vic2"
+
+# Operational Timeouts (Seconds)
+SOFT_OFF_TIMEOUT=30
+HARD_OFF_TIMEOUT=10
+BOOT_TIMEOUT=15
+# 2. INTERNAL ENVIRONMENT HELPERS
+USER_STAGING_DIR="$BASE_TFTP_DIR/users/$USER"
+
+ensure_user_staging() {
+    local target_user="${1:-$USER}"
+    local target_dir="$BASE_TFTP_DIR/users/$target_user"
+    if [ ! -d "$target_dir" ]; then
+        sudo mkdir -p "$target_dir"
+        sudo chown "$target_user:$GRP" "$target_dir"
+        sudo chmod 770 "$target_dir"
+    fi
+}
+
+check_status() {
+    local line_in=$1
+    CURRENT_STATE=$(gpioget --bias=pull-up $GPIO_CHIP $line_in)
+    if [ "$CURRENT_STATE" -eq 0 ]; then echo "ON"; else echo "OFF"; fi
+}
+
+wait_for_state() {
+    local line_in=$1
+    local target_state=$2
+    local timeout=$3
+    local elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+        local current=$(check_status $line_in)
+        if [ "$current" == "$target_state" ]; then return 0; fi
+    done
+    return 1
+}
+
+check_console_lock() {
+    local serial_dev=$1
+    local lock_file="/var/lock/LCK..$serial_dev"
+    
+    if [ ! -f "$lock_file" ]; then
+        echo "SECURITY ERROR: Control denied. You must open a console first."
+        echo "Run: hw $SYS_NAME"
+        exit 3
+    fi
+    
+    local lock_pid
+    lock_pid=$(cat "$lock_file" | tr -d '[:space:]')
+    if [[ ! "$lock_pid" =~ ^[0-9]+$ ]] || ! kill -0 "$lock_pid" 2>/dev/null; then
+        echo "SECURITY ERROR: Stale or corrupt console lock file detected."
+        exit 3
+    fi
+    
+    local lock_owner
+    lock_owner=$(ps -o user= -p "$lock_pid" | tr -d '[:space:]')
+    if [ "$lock_owner" != "$USER" ]; then
+        echo "SECURITY ERROR: Control denied. Active lock is held by user '$lock_owner'."
+        exit 3
+    fi
+}
+
+# 3. COMMAND INTERCEPTOR & ENGINE ROUTER
+COMMAND="$1"
+
+# --- SHORTCUT GATING PHASE ---
+if [[ -v SYSTEM_MAP[$COMMAND] ]]; then
+    if [ -z "$2" ]; then
+        SYS_NAME="$COMMAND"
+        COMMAND="con"
+    else
+        SYS_NAME="$COMMAND"
+        COMMAND="$2"
+    fi
+fi
+# ------------------------------
+
+if [ -z "$COMMAND" ]; then
+    echo "============================================================="
+    echo "AVAILABLE TARGET SYSTEMS"
+    echo "============================================================="
+    printf "%-12s %-8s %-12s %-12s\n" "HOST" "STATUS" "SERIAL PORT" "LOCK HOLDER"
+    echo "-------------------------------------------------------------"
+    for host in "${!SYSTEM_MAP[@]}"; do
+        CONFIG="${SYSTEM_MAP[$host]}"
+        L_IN=$(echo "$CONFIG" | cut -d':' -f2)
+        S_DEV=$(echo "$CONFIG" | cut -d':' -f3)
+        
+        CUR_STAT=$(check_status $L_IN)
+        LOCK_FILE="/var/lock/LCK..$S_DEV"
+        HOLDER="[FREE]"
+        
+        if [ -f "$LOCK_FILE" ]; then
+            LPID=$(cat "$LOCK_FILE" | tr -d '[:space:]')
+            if kill -0 "$LPID" 2>/dev/null; then
+                HOLDER=$(ps -o user= -p "$LPID" | tr -d '[:space:]')
+            fi
+        fi
+        printf "%-12s %-8s %-12s %-12s\n" "$host" "$CUR_STAT" "/dev/$S_DEV" "$HOLDER"
+    done
+    exit 0
+fi
+case "$COMMAND" in
+    con)
+        if [ -z "$SYS_NAME" ]; then SYS_NAME="$2"; fi
+        if [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_MAP[$SYS_NAME] ]]; then
+            echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+        fi
+        SERIAL_DEV=$(echo "${SYSTEM_MAP[$SYS_NAME]}" | cut -d':' -f3)
+        TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
+        LOG_FILE="$LOG_DIR/${SYS_NAME}con.${TIMESTAMP}.log"
+        
+        echo "Connecting to $SYS_NAME console (/dev/$SERIAL_DEV via picocom)..."
+        echo "Logging session output to: $LOG_FILE"
+        sleep 1
+        exec picocom -b 115200 -f h -g "$LOG_FILE" /dev/"$SERIAL_DEV"
+        ;;
+
+    log)
+        SUB_CMD="$2"
+        SYS_NAME="$3"
+        LOG_ARG="$4"
+        
+        if [ -z "$SUB_CMD" ] || [[ "$SUB_CMD" != "ls" && "$SUB_CMD" != "cat" && "$SUB_CMD" != "clean" ]]; then
+            echo "Error: Invalid log command layout."; exit 2
+        fi
+        if [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_MAP[$SYS_NAME] ]]; then
+            echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+        fi
+        
+        case "$SUB_CMD" in
+            ls)
+                echo "============================================================="
+                echo "AVAILABLE CONSOLE LOGS FOR HOST: $SYS_NAME"
+                echo "============================================================="
+                if [ -z "$(ls -A "$LOG_DIR"/${SYS_NAME}con.*.log 2>/dev/null)" ]; then
+                    echo "No log files found for $SYS_NAME."; exit 0
+                fi
+                ls -lhrt "$LOG_DIR"/${SYS_NAME}con.*.log | awk '{print $5, $6, $7, $8, $9}'
+                ;;
+            cat)
+                if [ -z "$LOG_ARG" ]; then
+                    LATEST_LOG=$(ls -t "$LOG_DIR"/${SYS_NAME}con.*.log 2>/dev/null | head -n 1)
+                    if [ -z "$LATEST_LOG" ]; then echo "Error: No logs exist for $SYS_NAME."; exit 1; fi
+                    cat "$LATEST_LOG"
+                else
+                    FULL_LOG_PATH="$LOG_DIR/$LOG_ARG"
+                    if [ ! -f "$FULL_LOG_PATH" ] || [[ "$(basename "$FULL_LOG_PATH")" != "${SYS_NAME}con."* ]]; then
+                        echo "Error: Invalid log file path mapping."; exit 2
+                    fi
+                    cat "$FULL_LOG_PATH"
+                fi
+                ;;
+            clean)
+                DAYS_THRESHOLD=${LOG_ARG:-7}
+                if [[ ! "$DAYS_THRESHOLD" =~ ^[0-9]+$ ]]; then
+                    echo "Error: Threshold must be a positive integer."; exit 2
+                fi
+                OLD_LOGS=$(find "$LOG_DIR" -maxdepth 1 -name "${SYS_NAME}con.*.log" -mtime +"$DAYS_THRESHOLD")
+                if [ -z "$OLD_LOGS" ]; then
+                    echo "Storage is clean."; exit 0
+                fi
+                echo "$OLD_LOGS" | xargs rm -f
+                echo "SUCCESS: Log cleanup finished."
+                ;;
+        esac
+        ;;
+    upload)
+        FILE_PATH="$2"
+        ALT_NAME="$3" # Passed internally from workstation mode to preserve original filename
+        if [ -z "$FILE_PATH" ] || [ ! -f "$FILE_PATH" ]; then
+            echo "Error: Please specify a valid local file to upload."; exit 2
+        fi
+        ensure_user_staging
+        
+        if [ -n "$ALT_NAME" ]; then FILENAME="$ALT_NAME"; else FILENAME=$(basename "$FILE_PATH"); fi
+        TARGET_DEST="$USER_STAGING_DIR/$FILENAME"
+        
+        mv "$FILE_PATH" "$TARGET_DEST" 2>/dev/null || cp "$FILE_PATH" "$TARGET_DEST"
+        echo "Uploaded and staged: $FILENAME"
+        
+        if [ ! -L "$USER_STAGING_DIR/vmlinuz" ] && [[ "$FILENAME" == *"vmlinuz"* || "$FILENAME" == *"zImage"* ]]; then
+            ln -sf "$TARGET_DEST" "$USER_STAGING_DIR/vmlinuz"
+        fi
+        if [ ! -L "$USER_STAGING_DIR/initrd.img" ] && [[ "$FILENAME" == *"initrd"* || "$FILENAME" == *"ramdisk"* ]]; then
+            ln -sf "$TARGET_DEST" "$USER_STAGING_DIR/initrd.img"
+        fi
+        ;;
+
+    ls)
+        ensure_user_staging
+        echo "============================================================="
+        echo "STAGED USER FILES FOR: $USER"
+        echo "============================================================="
+        if [ -z "$(ls -A "$USER_STAGING_DIR")" ]; then echo "Staging is empty."; exit 0; fi
+        ls -l "$USER_STAGING_DIR"
+        echo ""
+        find "$USER_STAGING_DIR" -maxdepth 1 -type f -exec md5sum {} +
+        ;;
+
+    activate)
+        TARGET_FILE="$2"
+        ensure_user_staging
+        if [ -z "$TARGET_FILE" ] || [ ! -f "$USER_STAGING_DIR/$TARGET_FILE" ]; then
+            echo "Error: Target file not found."; exit 2
+        fi
+        if [[ "$TARGET_FILE" == *"vmlinuz"* || "$TARGET_FILE" == *"zImage"* ]]; then
+            ln -sf "$USER_STAGING_DIR/$TARGET_FILE" "$USER_STAGING_DIR/vmlinuz"
+            echo "SUCCESS: Staging kernel link updated."
+        elif [[ "$TARGET_FILE" == *"initrd"* || "$TARGET_FILE" == *"ramdisk"* ]]; then
+            ln -sf "$USER_STAGING_DIR/$TARGET_FILE" "$USER_STAGING_DIR/initrd.img"
+            echo "SUCCESS: Staging initrd link updated."
+        else
+            echo "Error: File type ambiguous."; exit 2
+        fi
+        ;;
+
+    user)
+        USER_CMD="$2"
+        TARGET_USER="$3"
+        if [ -z "$USER_CMD" ]; then
+            echo "============================================================="
+            echo "LABORATORY ACCESS USERS ($GRP MEMBER REGISTRY)"
+            echo "============================================================="
+            getent group $GRP | cut -d':' -f4 | tr ',' '\n'; exit 0
+        fi
+        if [[ "$USER_CMD" != "add" && "$USER_CMD" != "del" ]] || [ -z "$TARGET_USER" ]; then
+            echo "Error: Invalid user syntax."; echo "Usage: hw user {add|del} <username>"; exit 2
+        fi
+        if [ "$EUID" -ne 0 ]; then
+            echo "Administrative access required. Re-routing via sudo..."
+            exec sudo "$0" "$@"
+        fi
+        if [ "$USER_CMD" == "add" ]; then
+            if id "$TARGET_USER" &>/dev/null; then 
+                echo "Error: User '$TARGET_USER' already exists on system layers."
+                exit 1
+            fi
+
+            # 1. Create the base Linux user profile
+            useradd -m -s /bin/bash "$TARGET_USER"
+            
+            # 2. Lock the password field immediately to disable standard password logins
+            passwd -l "$TARGET_USER" &>/dev/null
+            
+            # 3. Add user to the core lab peripheral access groups
+            usermod -aG $GRP,lock "$TARGET_USER"
+            ensure_user_staging "$TARGET_USER"
+            
+            # 4. Generate the secure Ed25519 SSH Keypair inside a temporary location
+            TMP_KEY_DIR=$(mktemp -d)
+            ssh-keygen -t ed25519 -f "$TMP_KEY_DIR/id_ed25519" -N "" -q -C "$TARGET_USER@lab-pi"
+            
+            # 5. Provision the user's local .ssh boundary structures inside their home directory
+            USER_HOME=$(eval echo "~$TARGET_USER")
+            mkdir -p "$USER_HOME/.ssh"
+            cat "$TMP_KEY_DIR/id_ed25519.pub" > "$USER_HOME/.ssh/authorized_keys"
+            
+            # Enforce strict standard OpenSSH permissions
+            chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/.ssh"
+            chmod 700 "$USER_HOME/.ssh"
+            chmod 600 "$USER_HOME/.ssh/authorized_keys"
+            
+            # 6. Output execution results and provide the secure credential block
+            echo "SUCCESS: Account profile created for '$TARGET_USER'."
+            echo "SUCCESS: Password login has been disabled and locked."
+            echo "SUCCESS: Staging workspace directories established."
+            echo ""
+            echo "========================================================================"
+            echo " PRIVATE CREDENTIAL DELIVERY BLOCK FOR USER: $TARGET_USER"
+            echo "========================================================================"
+            echo "Copy the text block below and save it as an identity file on the new"
+            echo "user's development workstation (e.g., ~/.ssh/id_lab_key):"
+            echo "------------------------------------------------------------------------"
+            cat "$TMP_KEY_DIR/id_ed25519"
+            echo "------------------------------------------------------------------------"
+            echo "========================================================================"
+            
+            # Wipe memory traces securely from temp storage
+            rm -rf "$TMP_KEY_DIR"
+            
+        elif [ "$USER_CMD" == "del" ]; then
+            if ! id "$TARGET_USER" &>/dev/null; then echo "Error: User does not exist."; exit 1; fi
+            userdel -r "$TARGET_USER" 2>/dev/null
+            rm -rf "$BASE_TFTP_DIR/users/$TARGET_USER"
+            echo "SUCCESS: Purged user account and staging folders for '$TARGET_USER'."
+        fi
+        ;;
+
+    status|on|off|force-off)
+        if [ -z "$SYS_NAME" ]; then SYS_NAME="$2"; fi
+        if [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_MAP[$SYS_NAME] ]]; then
+            echo "Error: Invalid host targets."; exit 2
+        fi
+        
+        PIN_CONFIG="${SYSTEM_MAP[$SYS_NAME]}"
+        LINE_OUT=$(echo "$PIN_CONFIG" | cut -d':' -f1)
+        LINE_IN=$(echo "$PIN_CONFIG" | cut -d':' -f2)
+        SERIAL_DEV=$(echo "$PIN_CONFIG" | cut -d':' -f3)
+        TFTP_PATH=$(echo "$PIN_CONFIG" | cut -d':' -f4)
+
+        if [ "$COMMAND" == "status" ]; then
+            STATUS=$(check_status $LINE_IN)
+            echo "Host '$SYS_NAME' is currently: $STATUS"; exit 0
+        fi
+
+        check_console_lock $SERIAL_DEV
+        ensure_user_staging
+
+        if [ ! -L "$USER_STAGING_DIR/vmlinuz" ] || [ ! -L "$USER_STAGING_DIR/initrd.img" ]; then
+            echo "ERROR: Missing active staging files."; exit 2
+        fi
+
+        case "$COMMAND" in
+            on)
+                STATUS=$(check_status $LINE_IN)
+                if [ "$STATUS" == "ON" ]; then echo "SUCCESS: Already running."; exit 0; fi
+                ln -sf "$USER_STAGING_DIR/vmlinuz" "$TFTP_PATH/vmlinuz"
+                ln -sf "$USER_STAGING_DIR/initrd.img" "$TFTP_PATH/initrd.img"
+                gpioset $GPIO_CHIP $LINE_OUT=1 && sleep 1 && gpioset $GPIO_CHIP $LINE_OUT=0
+                if wait_for_state $LINE_IN "ON" $BOOT_TIMEOUT; then
+                    echo "SUCCESS: Host booted via TFTP."; exit 0
+                else
+                    echo "ERROR: Boot verification timed out."; exit 1
+                fi
+                ;;
+            off)
+                STATUS=$(check_status $LINE_IN)
+                if [ "$STATUS" == "OFF" ]; then echo "SUCCESS: Already off."; exit 0; fi
+                gpioset $GPIO_CHIP $LINE_OUT=1 && sleep 1 && gpioset $GPIO_CHIP $LINE_OUT=0
+                if wait_for_state $LINE_IN "OFF" $SOFT_OFF_TIMEOUT; then
+                    echo "SUCCESS: Graceful power off verified."; exit 0
+                else
+                    echo "WARNING: Graceful timeout reached."; exit 1
+                fi
+                ;;
+            force-off)
+                STATUS=$(check_status $LINE_IN)
+                if [ "$STATUS" == "OFF" ]; then echo "SUCCESS: Already off."; exit 0; fi
+                gpioset $GPIO_CHIP $LINE_OUT=1 && sleep 5 && gpioset $GPIO_CHIP $LINE_OUT=0
+                if wait_for_state $LINE_IN "OFF" $HARD_OFF_TIMEOUT; then
+                    echo "SUCCESS: Hard cutoff complete."; exit 0
+                else
+                    echo "CRITICAL ERROR: Rails remain frozen."; exit 1
+                fi
+                ;;
+        esac
+        ;;
+
+    *)
+        echo "============================================================="
+        echo "HW UTILITY HELP GUIDE"
+        echo "============================================================="
+        echo "  hw                                    List victim deployment states"
+        echo "  hw <victim>                           Direct shortcut to drop into console"
+        echo "  hw user                               Lists users with lab access group permissions"
+        echo "  hw user {add|del} <name>              Manages user login and TFTP isolation profiles"
+        echo "  hw upload <path>                      Stages custom build modules to user root"
+        echo "  hw ls                                 Lists staged files and md5 sums"
+        echo "  hw activate <file>                    Changes current boot tracking assignment"
+        echo "  hw log ls <victim>                    Lists telemetry log sets"
+        echo "  hw log cat <victim> [file]            Views target file output stream"
+        echo "  hw log clean <victim> [days]          Prunes aged text logs"
+        echo "  hw <victim> {status|on|off|force-off} Control <victim> power state"
+        exit 2
+        ;;
+esac

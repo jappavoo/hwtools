@@ -1,0 +1,76 @@
+================================================================================
+HARDWARE WIRING DOCUMENTATION (TWO-MODULE USB-ISOLATED FRAMEWORK)
+================================================================================
+
+This script controls target PC power states using two independent 3.3V Relay 
+Modules equipped with optocouplers. This setup ensures total galvanic 
+isolation between the Raspberry Pi 4 and the Target Host Motherboard.
+
+--------------------------------------------------------------------------------
+MODULE A: POWER CONTROL (OUTPUT)
+--------------------------------------------------------------------------------
+Acts as a remote parallel switch across the target PC's chassis power button.
+
+  [ Raspberry Pi 4 Header ]                  [ Module A Pins ]
+    Pin 4  (5V Power)   ----------------------->  VCC
+    Pin 6  (GND Ground) ----------------------->  GND
+    Pin 12 (GPIO 18 / Out) -------------------->  IN
+    
+                                             [ Module A Terminal Block ]
+                                                  [ NO ]  -------> Target PC PWR_SW (+)
+                                                  [ COM ] -------> Target PC PWR_SW (-)
+                                                  [ NC ]  (Unused)
+
+  * NOTE: Wire the NO and COM terminals directly in parallel with the target PC's 
+    existing physical case power button wires (typically Yellow/Black on Dells).
+    This keeps the physical case button fully functional as a hardware backup.
+
+--------------------------------------------------------------------------------
+MODULE B: POWER DETECTION (INPUT)
+--------------------------------------------------------------------------------
+Senses whether the target PC is running by reading a rock-solid USB 5V rail.
+
+  [ Target Host (Dell PC) ]                  [ Module B Pins ]
+    Cut USB Cable Red (+5V) ------------------->  VCC
+    Cut USB Cable Red (+5V) ------------------->  IN  (Jumpered together)
+    Cut USB Cable Black (GND) ----------------->  GND
+    
+  * NOTE: Tying VCC and IN together on the input side means that whenever the 
+    Target PC turns on, its USB 5V rail powers the module coil and closes the relay.
+    Insulate and ignore the Green and White USB data wires.
+
+  [ Module B Terminal Block ]                [ Raspberry Pi 4 Header ]
+       [ NO ]   -------------------------------> Pin 18 (GPIO 24 / In)
+       [ COM ]  -------------------------------> Pin 14 (GND Ground)
+       [ NC ]   (Unused)
+
+  * NOTE: The script configures Pin 18 (GPIO 24) with an internal software PULL-UP 
+    resistor. When the Target PC is OFF, the relay is open, and the pin reads HIGH (1). 
+    When the Target PC is ON, the relay closes, shorting Pin 18 to GND, and the pin 
+    reads LOW (0).
+
+================================================================================
+RASPBERRY PI 4 PHYSICAL HEADER REF (PIN 1-20 SECTION)
+================================================================================
+                        OUTSIDE EDGE OF PI BOARD
+                  +-----------------------------------+
+
+
+                  | Pin 2  | Pin 4  | Pin 6  | Pin 8  | Pin 10 |
+                  |  5V    |  5V    |  GND   |  TXD   |  RXD   |
+                  |   o    |   o    |   o    |   o    |   o    |
+                  |   o    |   o    |   o    |   o    |   o    |
+                  |  3.3V  |  SDA   |  SCL   |  G4    |  GND   |
+                  | Pin 1  | Pin 3  | Pin 5  | Pin 7  | Pin 9  |
+                  +-----------------------------------+
+
+
+                  | Pin 12 | Pin 14 | Pin 16 | Pin 18 | Pin 20 |
+                  |  G18   |  GND   |  G23   |  G24   |  GND   |
+                  |   o    |   o    |   o    |   o    |   o    |
+                  |   o    |   o    |   o    |   o    |   o    |
+                  |  G17   |  G27   |  G22   |  G10   |  G9    |
+                  | Pin 11 | Pin 13 | Pin 15 | Pin 17 | Pin 19 |
+                  +-----------------------------------+
+                        INSIDE EDGE OF PI BOARD
+================================================================================
