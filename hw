@@ -304,7 +304,7 @@ case "$COMMAND" in
             
             # 4. Generate the secure Ed25519 SSH Keypair inside a temporary location
             TMP_KEY_DIR=$(mktemp -d)
-            ssh-keygen -t ed25519 -f "$TMP_KEY_DIR/id_ed25519" -N "" -q
+            ssh-keygen -t ed25519 -f "$TMP_KEY_DIR/id_ed25519" -N "" -q -C "$TARGET_USER@$(hostname)"
             
             # 5. Provision the user's local .ssh boundary structures inside their home directory
             USER_HOME=$(eval echo "~$TARGET_USER")
