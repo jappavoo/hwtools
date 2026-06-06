@@ -51,24 +51,33 @@ sudo chmod 775 /srv/tftp/vic3
 
 To stop Linux from randomly swapping your serial adapters between `/dev/ttyUSB0` and `/dev/ttyUSB1` when the Pi restarts, you must assign a persistent alias matching your script (e.g., `ttyVIC3`).
 
-### Step 1: Identify the Serial Adapter Serial Number
-Plug your new USB-to-Serial adapter into the Pi and run `lsusb` or parse `dmesg` logs to extract its unique vendor attributes:
+### Step 1: Identify Stable Device Properties
+Plug your new USB-to-Serial adapter into the Pi and collect stable attributes:
 ```bash
-udevadm info --name=/dev/ttyUSB0 --attribute-walk | grep -E "serial|idVendor|idProduct"
+udevadm info -q property -n /dev/ttyUSB0 | grep -E "ID_SERIAL_SHORT|^ID_PATH="
 ```
-*Look for output lines resembling:*
-*   `ATTRS{idVendor}=="0403"`
-*   `ATTRS{idProduct}=="6001"`
-*   `ATTRS{serial}=="FT92A3B4"`
+Use `ID_SERIAL_SHORT` when available; otherwise use `ID_PATH` for deterministic mapping.
 
 ### Step 2: Write a Custom udev Rule
 Open your custom rules file:
 ```bash
-sudo nano /etc/udev/rules.d/99-usb-serial.rules
+sudo nano /etc/udev/rules.d/99-serial.rules
 ```
-Append a new hardware assignment line matching the extracted device parameters exactly:
+Use this pattern (includes comments for future device onboarding):
 ```text
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTRS{serial}=="FT92A3B4", SYMLINK+="ttyVIC3"
+# Apply to all USB serial adapters so ownership is consistent.
+SUBSYSTEM=="tty", KERNEL=="ttyUSB[0-9]*", GROUP="dialout", MODE="0660"
+
+# Existing lab mappings:
+SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ENV{ID_PATH}=="platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0", SYMLINK+="ttyVIC1"
+SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ENV{ID_SERIAL_SHORT}=="FTE6J1CF", SYMLINK+="ttyVIC2"
+
+# New device template:
+# 1) Find identifier: udevadm info -q property -n /dev/ttyUSBX | grep -E "ID_SERIAL_SHORT|^ID_PATH="
+# 2) Prefer ID_SERIAL_SHORT; use ID_PATH if serial is missing.
+# 3) Add one line per new victim alias (ttyVIC3, ttyVIC4, ...):
+# SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ENV{ID_SERIAL_SHORT}=="<SERIAL>", SYMLINK+="ttyVIC3"
+# SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ENV{ID_PATH}=="<PATH>", SYMLINK+="ttyVIC3"
 ```
 Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X`).
 
@@ -78,9 +87,10 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 Verify that the persistent symlink has generated successfully:
 ```bash
-ls -l /dev/ttyVIC3
+ls -l /dev/ttyUSB* /dev/ttyVIC*
+stat -c '%n %U:%G %a' /dev/ttyUSB0 /dev/ttyUSB1
 ```
-*Expected Output:* `lrwxrwxrwx 1 root root 7 Jun  6 09:00 /dev/ttyVIC3 -> ttyUSB0`
+The `/dev/ttyUSB*` devices should now be owned by group `dialout` with mode `0660`.
 
 ---
 

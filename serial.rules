@@ -1,0 +1,13 @@
+# Apply to all USB serial adapters so ownership is consistent.
+SUBSYSTEM=="tty", KERNEL=="ttyUSB[0-9]*", GROUP="dialout", MODE="0660"
+
+# Existing lab mappings:
+SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ENV{ID_PATH}=="platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0", SYMLINK+="ttyVIC1"
+SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ENV{ID_SERIAL_SHORT}=="FTE6J1CF", SYMLINK+="ttyVIC2"
+
+# New device template:
+# 1) Find identifier: udevadm info -q property -n /dev/ttyUSBX | grep -E "ID_SERIAL_SHORT|^ID_PATH="
+# 2) Prefer ID_SERIAL_SHORT; use ID_PATH if serial is missing.
+# 3) Add one line per new victim alias (ttyVIC3, ttyVIC4, ...):
+# SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ENV{ID_SERIAL_SHORT}=="<SERIAL>", SYMLINK+="ttyVIC3"
+# SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ENV{ID_PATH}=="<PATH>", SYMLINK+="ttyVIC3"

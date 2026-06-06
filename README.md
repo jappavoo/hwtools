@@ -66,8 +66,8 @@ The head is configured to run a network boot service and NAT on the private netw
 
 The following is the setup on the head node to initialize the filesystem structure and group privileges:
 
-Note we use the `plugdev` group not `dialout` given that the serial adapters are usb and by default the 
-`/dev/ttyUSB*` files are create with group ownership `plugdev`.
+`hw` uses `dialout` as the single access group registry.
+Users provisioned by `hw user add` are added only to `dialout`.
 
 ```bash
 # Create shared terminal logging environment
@@ -76,8 +76,8 @@ sudo mkdir -p /var/log/serial
 # Create system TFTP target locations
 sudo mkdir -p /srv/tftp/vic1 /srv/tftp/vic2 /srv/tftp/users
 
-# Make the plugdev group own the laboratory directory trees
-sudo chown -R root:plugdev /srv/tftp /var/log/serial
+# Make the dialout group own the laboratory directory trees
+sudo chown -R root:dialout /srv/tftp /var/log/serial
 sudo chmod -R 775 /srv/tftp /var/log/serial
 
 # Apply the SGID bit so new files inherit the group ownership automatically

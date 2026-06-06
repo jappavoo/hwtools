@@ -8,7 +8,7 @@
 # --- REMOTE WORKSTATION AUTO-DETECTION PHASE ---
 # Change this variable to match your Raspberry Pi's private network domain/IP
 HEAD_NODE="JA-HW-HEAD"
-GRP=plugdev
+GRP=dialout
 
 # Detect if we are running locally on the Raspberry Pi 4 
 if [ ! -f /proc/device-tree/model ] || ! grep -q "Raspberry Pi" /proc/device-tree/model; then
@@ -328,13 +328,8 @@ case "$COMMAND" in
             # 2. Lock the password field immediately to disable standard password logins
             passwd -l "$TARGET_USER" &>/dev/null
             
-            # 3. Add user to the core lab peripheral access groups.
-            # Some distros do not define a "lock" group, so include it conditionally.
-            LAB_GROUPS="$GRP"
-            if getent group lock >/dev/null 2>&1; then
-                LAB_GROUPS="$LAB_GROUPS,lock"
-            fi
-            usermod -aG "$LAB_GROUPS" "$TARGET_USER"
+            # 3. Add user to the core lab peripheral access group.
+            usermod -aG "$GRP" "$TARGET_USER"
             ensure_user_staging "$TARGET_USER"
             
             # 4. Generate the secure Ed25519 SSH Keypair inside a temporary location
