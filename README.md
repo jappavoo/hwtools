@@ -157,7 +157,7 @@ To add a new researcher, create their Linux profile, block password entries, and
 ```bash
 hw user add jappavoo
 ```
-*Note: This command generates a secure Ed25519 SSH keypair on the fly, locks the password matrix, and outputs the raw private key to the screen. The administrator must copy this terminal string block and deliver it securely to the user to place on their workstation as `~/.ssh/JA-HW-HEAD`.*
+*Note: This command generates a secure Ed25519 SSH keypair on the fly, locks the password matrix, stores the keypair in the new user's `~/.ssh/` as `id_ed25519` and `id_ed25519.pub`, and outputs the raw private key to the screen for secure delivery to the user workstation.*
 
 ### De-provision a Lab User
 To cleanly remove a user, delete their account, and clear out their staged development files to reclaim disk space:
