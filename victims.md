@@ -52,6 +52,14 @@ sudo chmod 775 /srv/tftp/vic3/production
 
 Place production boot images in `/srv/tftp/vic3/production/`. If there is only one kernel/initrd pair, `hw activate production vic3` will choose it automatically; if there are multiple, rerun with explicit filenames. A common naming pattern is `vmlinuz.prod`, `initrd.img.prod`, `vmlinuz.prodA`, `initrd.img.prodA`, etc.
 
+For PXE command lines, use this tree:
+```bash
+sudo mkdir -p /srv/tftp/pxelinux.cfg/production/vic3
+sudo mkdir -p /srv/tftp/pxelinux.cfg/users/jappavoo/vic3
+sudo ln -sf /srv/tftp/pxelinux.cfg/users/jappavoo/vic3/01-xx-xx-xx-xx-xx-xx /srv/tftp/pxelinux.cfg/01-xx-xx-xx-xx-xx-xx
+```
+Production cmdline files live under `/srv/tftp/pxelinux.cfg/production/<host>/`, staged edits live under `/srv/tftp/pxelinux.cfg/users/<user>/<host>/`, and the active MAC file at `/srv/tftp/pxelinux.cfg/<mac>` is a symlink to one of them.
+
 ---
 
 ## 3. Persistent Serial Interface Naming (udev Rules)

@@ -199,6 +199,22 @@ hw ls prod vic1
 Listings now show file date, size, and md5sum.
 `hw ls` defaults to `stage`.
 
+### Step 2c: Manage PXE Command Lines
+```bash
+# View active cmdline or list available cmdline files
+hw cmdline ls stage vic1
+hw cmdline ls prod vic1
+
+# View active, production, or staged cmdline contents
+hw cmdline cat vic1
+hw cmdline cat prod vic1
+hw cmdline cat stage vic1
+
+# Seed and activate a staged cmdline from production
+hw cmdline seed vic1
+hw cmdline activate staging vic1
+```
+
 ### Step 3: Switch Active Images (Optional)
 If you have multiple builds staged in your directory and want to change your active image choice:
 ```bash

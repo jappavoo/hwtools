@@ -48,6 +48,13 @@ LOG_DIR="/var/log/serial"
 declare -A SYSTEM_MAP
 SYSTEM_MAP["vic1"]="18:24:ttyVIC1:$BASE_TFTP_DIR/vic1"
 SYSTEM_MAP["vic2"]="19:25:ttyVIC2:$BASE_TFTP_DIR/vic2"
+declare -A SYSTEM_MAC
+SYSTEM_MAC["vic1"]="01-64-00-6a-50-c4-3f"
+SYSTEM_MAC["vic2"]="01-64-00-6a-51-43-e0"
+
+PXE_CFG_DIR="$BASE_TFTP_DIR/pxelinux.cfg"
+PXE_PROD_DIR="$PXE_CFG_DIR/production"
+PXE_USER_DIR="$PXE_CFG_DIR/users/$USER"
 
 # Operational Timeouts (Seconds)
 SOFT_OFF_TIMEOUT=30
@@ -64,6 +71,138 @@ ensure_user_staging() {
         sudo chown "$target_user:$GRP" "$target_dir"
         sudo chmod 770 "$target_dir"
     fi
+}
+
+ensure_pxe_tree() {
+    mkdir -p "$PXE_PROD_DIR" "$PXE_CFG_DIR/users/$USER"
+}
+
+get_host_mac() {
+    local target_host=$1
+    if [ -z "${SYSTEM_MAC[$target_host]}" ]; then
+        return 1
+    fi
+    printf '%s\n' "${SYSTEM_MAC[$target_host]}"
+}
+
+list_pxe_files() {
+    local source_name=$1
+    local target_host=$2
+    local target_dir
+    local -a files=()
+    local path
+
+    case "$source_name" in
+        production)
+            target_dir="$PXE_PROD_DIR/$target_host"
+            ;;
+        staging)
+            target_dir="$PXE_CFG_DIR/users/$USER/$target_host"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+    shopt -s nullglob
+    files=( "$target_dir"/* )
+    shopt -u nullglob
+
+    if [ "$source_name" = "staging" ]; then
+        echo "STAGED CMDLINE FILES FOR: $target_host"
+    else
+        echo "PRODUCTION CMDLINE FILES FOR: $target_host"
+    fi
+    echo "-------------------------------------------------------------"
+    printf "%-40s %-17s %-10s %s\n" "FILE" "DATE" "SIZE" "MD5SUM"
+    if [ ${#files[@]} -eq 0 ]; then
+        echo "No cmdline files found."
+        return 0
+    fi
+    for path in "${files[@]}"; do
+        [ -f "$path" ] || continue
+        print_file_metadata "$path"
+    done
+}
+
+resolve_pxe_candidate() {
+    local source_name=$1
+    local target_host=$2
+    local requested_file=$3
+    local target_dir
+    local -a candidates=()
+    local path
+    local count=0
+
+    case "$source_name" in
+        production)
+            target_dir="$PXE_PROD_DIR/$target_host"
+            ;;
+        staging)
+            target_dir="$PXE_CFG_DIR/users/$USER/$target_host"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+    shopt -s nullglob
+    candidates=( "$target_dir"/* )
+    shopt -u nullglob
+
+    if [ -n "$requested_file" ]; then
+        path="$target_dir/$requested_file"
+        if [ ! -f "$path" ]; then
+            echo "Error: Cmdline file '$requested_file' not found for '$target_host' ($source_name)."
+            exit 2
+        fi
+        printf '%s\n' "$path"
+        return 0
+    fi
+
+    for path in "${candidates[@]}"; do
+        [ -f "$path" ] || continue
+        count=$((count + 1))
+    done
+
+    if [ "$count" -eq 1 ]; then
+        for path in "${candidates[@]}"; do
+            [ -f "$path" ] || continue
+            printf '%s\n' "$path"
+            return 0
+        done
+    fi
+
+    if [ "$count" -gt 1 ]; then
+        list_pxe_files "$source_name" "$target_host"
+        echo "Error: Multiple cmdline files exist for '$target_host' ($source_name). Rerun with explicit filename."
+        exit 2
+    fi
+
+    echo "Error: No cmdline files are available for '$target_host' ($source_name)."
+    exit 2
+}
+
+get_active_pxe_target() {
+    local target_host=$1
+    local mac
+    mac=$(get_host_mac "$target_host") || return 1
+    readlink -f "$PXE_CFG_DIR/$mac" 2>/dev/null || printf '%s\n' "$PXE_CFG_DIR/$mac"
+}
+
+set_active_pxe_target() {
+    local target_host=$1
+    local source_name=$2
+    local requested_file=$3
+    local mac
+    local target_path
+
+    ensure_pxe_tree
+    mac=$(get_host_mac "$target_host") || {
+        echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"
+        exit 2
+    }
+    target_path=$(resolve_pxe_candidate "$source_name" "$target_host" "$requested_file")
+    ln -sf "$target_path" "$PXE_CFG_DIR/$mac"
+    echo "SUCCESS: Activated ${source_name} cmdline for '$target_host'."
 }
 
 list_host_production_files() {
@@ -678,6 +817,122 @@ case "$COMMAND" in
         fi
         ;;
 
+    cmdline)
+        CMD_ACTION="${2:-ls}"
+        ensure_pxe_tree
+        case "$CMD_ACTION" in
+            ls)
+                CMD_SOURCE="${3:-stage}"
+                CMD_HOST="$4"
+                if [ "$CMD_SOURCE" != "stage" ] && [ "$CMD_SOURCE" != "prod" ]; then
+                    echo "Error: Usage: hw cmdline ls [stage|prod [host]]"; exit 2
+                fi
+                if [ "$CMD_SOURCE" = "prod" ]; then
+                    echo "============================================================="
+                    echo "PRODUCTION CMDLINE FILES"
+                    echo "============================================================="
+                    if [ -n "$CMD_HOST" ]; then
+                        if [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
+                            echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                        fi
+                        list_pxe_files production "$CMD_HOST"
+                    else
+                        for host in "${!SYSTEM_MAP[@]}"; do
+                            list_pxe_files production "$host"
+                        done
+                    fi
+                else
+                    echo "============================================================="
+                    echo "STAGED CMDLINE FILES"
+                    echo "============================================================="
+                    if [ -n "$CMD_HOST" ]; then
+                        if [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
+                            echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                        fi
+                        list_pxe_files staging "$CMD_HOST"
+                    else
+                        for host in "${!SYSTEM_MAP[@]}"; do
+                            list_pxe_files staging "$host"
+                        done
+                    fi
+                fi
+                ;;
+            cat)
+                CMD_SOURCE="${3:-active}"
+                CMD_HOST="$4"
+                CMD_FILE="$5"
+                if [ -z "$CMD_HOST" ]; then
+                    CMD_HOST="$CMD_SOURCE"
+                    CMD_SOURCE="active"
+                    CMD_FILE="$4"
+                fi
+                if [ -z "$CMD_HOST" ] || [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
+                    echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                fi
+                case "$CMD_SOURCE" in
+                    active)
+                        ACTIVE_PATH=$(get_active_pxe_target "$CMD_HOST")
+                        if [ ! -f "$ACTIVE_PATH" ]; then
+                            echo "Error: No active cmdline exists for '$CMD_HOST'."; exit 2
+                        fi
+                        cat "$ACTIVE_PATH"
+                        ;;
+                    prod|production)
+                        PROD_PATH=$(resolve_pxe_candidate production "$CMD_HOST" "$CMD_FILE")
+                        cat "$PROD_PATH"
+                        ;;
+                    stage|staging)
+                        STAGE_PATH=$(resolve_pxe_candidate staging "$CMD_HOST" "$CMD_FILE")
+                        cat "$STAGE_PATH"
+                        ;;
+                    *)
+                        echo "Error: Usage: hw cmdline cat [active|prod|stage] <host> [file]"; exit 2
+                        ;;
+                esac
+                ;;
+            seed)
+                CMD_HOST="$3"
+                CMD_SOURCE_FILE="$4"
+                CMD_DEST_FILE="$5"
+                if [ -z "$CMD_HOST" ] || [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
+                    echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                fi
+                PROD_PATH=$(resolve_pxe_candidate production "$CMD_HOST" "$CMD_SOURCE_FILE")
+                mkdir -p "$PXE_CFG_DIR/users/$USER/$CMD_HOST"
+                if [ -z "$CMD_DEST_FILE" ]; then
+                    CMD_DEST_FILE="${PROD_PATH##*/}"
+                fi
+                cp "$PROD_PATH" "$PXE_CFG_DIR/users/$USER/$CMD_HOST/$CMD_DEST_FILE"
+                echo "SUCCESS: Seeded staged cmdline '$CMD_DEST_FILE' for '$CMD_HOST'."
+                ;;
+            activate)
+                CMD_SOURCE="$3"
+                CMD_HOST="$4"
+                CMD_FILE="$5"
+                if [ -z "$CMD_SOURCE" ] || [ -z "$CMD_HOST" ]; then
+                    echo "Error: Usage: hw cmdline activate {production|staging} <host> [file]"; exit 2
+                fi
+                if [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
+                    echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                fi
+                case "$CMD_SOURCE" in
+                    production)
+                        set_active_pxe_target "$CMD_HOST" production "$CMD_FILE"
+                        ;;
+                    staging)
+                        set_active_pxe_target "$CMD_HOST" staging "$CMD_FILE"
+                        ;;
+                    *)
+                        echo "Error: Usage: hw cmdline activate {production|staging} <host> [file]"; exit 2
+                        ;;
+                esac
+                ;;
+            *)
+                echo "Error: Usage: hw cmdline {ls|cat|seed|activate} ..."; exit 2
+                ;;
+        esac
+        ;;
+
     user)
         USER_CMD="$2"
         TARGET_USER="$3"
@@ -838,6 +1093,7 @@ case "$COMMAND" in
         echo "  hw user {add|del} <name>              Manages user login and TFTP isolation profiles"
         echo "  hw upload <path>                      Stages custom build modules to user root"
         echo "  hw ls [stage|prod [host]]             Lists staged or production files"
+        echo "  hw cmdline {ls|cat|seed|activate} ...  Manages PXE cmdline files"
         echo "  hw activate <file>                    Changes current staging boot tracking assignment"
         echo "  hw activate staging <host> [kernel initrd] Selects staged boot source for a host"
         echo "  hw activate production <host> [kernel initrd] Selects production boot source for a host"
