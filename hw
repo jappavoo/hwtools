@@ -269,9 +269,15 @@ case "$COMMAND" in
             SYS_NAME="$2"
             LOG_ARG="$3"
         elif [[ "$SUB_CMD" != "ls" && "$SUB_CMD" != "cat" && "$SUB_CMD" != "clean" ]]; then
-            SYS_NAME="$SUB_CMD"
-            SUB_CMD="ls"
-            LOG_ARG="$3"
+            if [[ "$SUB_CMD" == *"con."*".log" && "$SUB_CMD" != *"/"* ]]; then
+                LOG_ARG="$SUB_CMD"
+                SYS_NAME="${SUB_CMD%%con.*.log}"
+                SUB_CMD="cat"
+            else
+                SYS_NAME="$SUB_CMD"
+                SUB_CMD="ls"
+                LOG_ARG="$3"
+            fi
         fi
         if [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_MAP[$SYS_NAME] ]]; then
             echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
@@ -313,6 +319,9 @@ case "$COMMAND" in
                 fi
                 ;;
             clean)
+                if [[ "$SYS_NAME" == *"con."*".log" && "$SYS_NAME" != *"/"* ]]; then
+                    SYS_NAME="${SYS_NAME%%con.*.log}"
+                fi
                 DAYS_THRESHOLD=${LOG_ARG:-7}
                 if [[ ! "$DAYS_THRESHOLD" =~ ^[0-9]+$ ]]; then
                     echo "Error: Threshold must be a positive integer."; exit 2

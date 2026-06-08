@@ -247,6 +247,12 @@ hw log ls vic1
 # Read the contents of the absolute newest session trace
 hw log cat vic1
 
+# Read a specific log file directly by basename
+hw log vic1con.2026-06-08_08-00-00.log
+
 # Delete console log traces older than a rolling 14-day threshold window
 hw log clean vic1 14
+
+# Same as above, using a log basename to identify the host
+hw log clean vic1con.2026-06-08_08-00-00.log 14
 ```
