@@ -44,6 +44,9 @@ if [ ! -f /proc/device-tree/model ] || ! grep -q "Raspberry Pi" /proc/device-tre
         scp "$LOCAL_FILE" "${HEAD_NODE}:/tmp/hw-cmdline-upload-$(basename "$LOCAL_FILE")" && \
         ssh -q -t "${HEAD_NODE}" "hw cmdline upload $HOST /tmp/hw-cmdline-upload-$(basename "$LOCAL_FILE") $DEST_FILE"
         exit $?
+    elif [ "$COMMAND" == "cat" ]; then
+        # No -t: stdout must be a clean byte stream for binary kernel/initrd files
+        exec ssh -q "${HEAD_NODE}" hw "$@"
     elif [ -z "$COMMAND" ]; then
         # Forward naked list queries cleanly using active user session context
         exec ssh -q -t "${HEAD_NODE}" "hw"
@@ -840,6 +843,59 @@ case "$COMMAND" in
         done
         ;;
 
+    cat)
+        CAT_HOST="$2"
+        CAT_ARTIFACT="$3"
+        CAT_SOURCE="${4:-active}"
+        CAT_FILE="$5"
+
+        if [ -z "$CAT_HOST" ] || [[ ! -v SYSTEM_TTY[$CAT_HOST] ]]; then
+            echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
+        fi
+        if [[ "$CAT_ARTIFACT" != "kernel" && "$CAT_ARTIFACT" != "initrd" && "$CAT_ARTIFACT" != "cmdline" ]]; then
+            echo "Error: Usage: hw cat <host> {kernel|initrd|cmdline} [active|prod|stage] [file]"; exit 2
+        fi
+        if [[ "$CAT_SOURCE" != "active" && "$CAT_SOURCE" != "prod" && "$CAT_SOURCE" != "stage" ]]; then
+            echo "Error: Usage: hw cat <host> {kernel|initrd|cmdline} [active|prod|stage] [file]"; exit 2
+        fi
+
+        TFTP_PATH="${SYSTEM_TFTP[$CAT_HOST]}"
+        local_path=""
+
+        case "$CAT_ARTIFACT" in
+            kernel|initrd)
+                ensure_user_staging
+                case "$CAT_SOURCE" in
+                    active)
+                        case "$CAT_ARTIFACT" in
+                            kernel) local_path="$TFTP_PATH/vmlinuz" ;;
+                            initrd) local_path="$TFTP_PATH/initrd.img" ;;
+                        esac
+                        if [ ! -e "$local_path" ]; then
+                            echo "Error: No active $CAT_ARTIFACT for '$CAT_HOST'."; exit 2
+                        fi
+                        ;;
+                    prod)  local_path=$(resolve_production_image "$TFTP_PATH" "$CAT_ARTIFACT" "$CAT_FILE") ;;
+                    stage) local_path=$(resolve_staged_image "$CAT_ARTIFACT" "$CAT_FILE") ;;
+                esac
+                ;;
+            cmdline)
+                ensure_pxe_tree
+                case "$CAT_SOURCE" in
+                    active)
+                        local_path=$(get_active_pxe_target "$CAT_HOST")
+                        if [ ! -f "$local_path" ]; then
+                            echo "Error: No active cmdline for '$CAT_HOST'."; exit 2
+                        fi
+                        ;;
+                    prod)  local_path=$(resolve_pxe_candidate prod "$CAT_HOST" "$CAT_FILE") ;;
+                    stage) local_path=$(resolve_pxe_candidate stage "$CAT_HOST" "$CAT_FILE") ;;
+                esac
+                ;;
+        esac
+        cat "$local_path"
+        ;;
+
     activate)
         TARGET_HOST="$2"
         TARGET_ARTIFACT="$3"
@@ -1173,6 +1229,7 @@ case "$COMMAND" in
         echo "  hw user {add|del} <name>              Manages user login and TFTP isolation profiles"
         echo "  hw upload <path>                      Stages custom build modules to user root"
         echo "  hw ls [stage|prod [host]]             Lists staged or production files"
+        echo "  hw cat <host> {kernel|initrd|cmdline} [active|prod|stage] [file]  Outputs artifact (redirect for binary)"
         echo "  hw cmdline {ls|cat|seed|upload} ...   Manages PXE cmdline files"
         echo "  hw activate <host> {all|kernel|initrd|cmdline} {prod|stage} [file]  Activates boot artifact for a host"
         echo "  hw log [ls] <victim>                  Lists telemetry log sets"
