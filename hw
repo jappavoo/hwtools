@@ -28,6 +28,20 @@ if [ ! -f /proc/device-tree/model ] || ! grep -q "Raspberry Pi" /proc/device-tre
         scp "$LOCAL_FILE" "${HEAD_NODE}:/tmp/hw-upload-tmp" && \
         ssh -q -t "${HEAD_NODE}" "hw upload /tmp/hw-upload-tmp $(basename "$LOCAL_FILE")"
         exit $?
+    elif [ "$COMMAND" == "cmdline" ] && [ "$2" == "upload" ]; then
+        HOST="$3"
+        LOCAL_FILE="$4"
+        DEST_FILE="$5"
+        if [ -z "$HOST" ] || [ -z "$LOCAL_FILE" ] || [ ! -f "$LOCAL_FILE" ]; then
+            echo "Error: Usage: hw cmdline upload <host> <local-file> [dest-file]"; exit 2
+        fi
+        if [ -z "$DEST_FILE" ]; then
+            DEST_FILE="$(basename "$LOCAL_FILE")"
+        fi
+        echo "Transferring cmdline over private network to Pi staging zone..."
+        scp "$LOCAL_FILE" "${HEAD_NODE}:/tmp/hw-cmdline-upload-$(basename "$LOCAL_FILE")" && \
+        ssh -q -t "${HEAD_NODE}" "hw cmdline upload $HOST /tmp/hw-cmdline-upload-$(basename "$LOCAL_FILE") $DEST_FILE"
+        exit $?
     elif [ -z "$COMMAND" ]; then
         # Forward naked list queries cleanly using active user session context
         exec ssh -q -t "${HEAD_NODE}" "hw"
@@ -905,6 +919,27 @@ case "$COMMAND" in
                 cp "$PROD_PATH" "$PXE_CFG_DIR/users/$USER/$CMD_HOST/$CMD_DEST_FILE"
                 echo "SUCCESS: Seeded staged cmdline '$CMD_DEST_FILE' for '$CMD_HOST'."
                 ;;
+            upload)
+                CMD_HOST="$3"
+                CMD_SOURCE_FILE="$4"
+                CMD_DEST_FILE="$5"
+                if [ -z "$CMD_HOST" ] || [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
+                    echo "Error: Usage: hw cmdline upload <host> <local-file> [dest-file]"; exit 2
+                fi
+                if [ -z "$CMD_SOURCE_FILE" ] || [ ! -f "$CMD_SOURCE_FILE" ]; then
+                    echo "Error: Usage: hw cmdline upload <host> <local-file> [dest-file]"; exit 2
+                fi
+                ensure_user_staging
+                mkdir -p "$PXE_CFG_DIR/users/$USER/$CMD_HOST"
+                if [ -z "$CMD_DEST_FILE" ]; then
+                    CMD_DEST_FILE="${CMD_SOURCE_FILE##*/}"
+                fi
+                if [[ "$CMD_DEST_FILE" == *"/"* ]]; then
+                    echo "Error: Destination filename must not include a path."; exit 2
+                fi
+                cp "$CMD_SOURCE_FILE" "$PXE_CFG_DIR/users/$USER/$CMD_HOST/$CMD_DEST_FILE"
+                echo "SUCCESS: Uploaded staged cmdline '$CMD_DEST_FILE' for '$CMD_HOST'."
+                ;;
             activate)
                 CMD_SOURCE="$3"
                 CMD_HOST="$4"
@@ -928,7 +963,7 @@ case "$COMMAND" in
                 esac
                 ;;
             *)
-                echo "Error: Usage: hw cmdline {ls|cat|seed|activate} ..."; exit 2
+                echo "Error: Usage: hw cmdline {ls|cat|seed|upload|activate} ..."; exit 2
                 ;;
         esac
         ;;
@@ -1093,7 +1128,7 @@ case "$COMMAND" in
         echo "  hw user {add|del} <name>              Manages user login and TFTP isolation profiles"
         echo "  hw upload <path>                      Stages custom build modules to user root"
         echo "  hw ls [stage|prod [host]]             Lists staged or production files"
-        echo "  hw cmdline {ls|cat|seed|activate} ...  Manages PXE cmdline files"
+        echo "  hw cmdline {ls|cat|seed|upload|activate} ...  Manages PXE cmdline files"
         echo "  hw activate <file>                    Changes current staging boot tracking assignment"
         echo "  hw activate staging <host> [kernel initrd] Selects staged boot source for a host"
         echo "  hw activate production <host> [kernel initrd] Selects production boot source for a host"

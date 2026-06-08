@@ -59,6 +59,7 @@ sudo mkdir -p /srv/tftp/pxelinux.cfg/users/jappavoo/vic3
 sudo ln -sf /srv/tftp/pxelinux.cfg/users/jappavoo/vic3/01-xx-xx-xx-xx-xx-xx /srv/tftp/pxelinux.cfg/01-xx-xx-xx-xx-xx-xx
 ```
 Production cmdline files live under `/srv/tftp/pxelinux.cfg/production/<host>/`, staged edits live under `/srv/tftp/pxelinux.cfg/users/<user>/<host>/`, and the active MAC file at `/srv/tftp/pxelinux.cfg/<mac>` is a symlink to one of them.
+Use `hw cmdline seed <host>` to copy production into your staging area, edit the file locally, then use `hw cmdline upload <host> <file>` to push the edited copy back without hand-writing TFTP paths.
 
 ---
 

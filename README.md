@@ -212,6 +212,7 @@ hw cmdline cat stage vic1
 
 # Seed and activate a staged cmdline from production
 hw cmdline seed vic1
+hw cmdline upload vic1 edited.cmdline
 hw cmdline activate staging vic1
 ```
 
