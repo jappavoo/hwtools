@@ -78,7 +78,7 @@ list_host_production_files() {
 
     echo "PRODUCTION FILES FOR: $target_host"
     echo "-------------------------------------------------------------"
-    printf "%-40s %-24s %-8s %s\n" "FILE" "DATE" "SIZE" "MD5SUM"
+    printf "%-40s %-17s %-10s %s\n" "FILE" "DATE" "SIZE" "MD5SUM"
     if [ ${#production_files[@]} -eq 0 ]; then
         echo "No production files found."
         return 0
@@ -98,7 +98,7 @@ print_file_metadata() {
     local file_md5
 
     file_name="${file_path##*/}"
-    file_date=$(stat -c '%y' "$file_path" 2>/dev/null)
+    file_date=$(date -d "$(stat -c '%y' "$file_path" 2>/dev/null)" '+%y/%m/%d %H:%M:%S' 2>/dev/null)
     file_size=$(stat -c '%s' "$file_path" 2>/dev/null)
     file_md5=$(md5sum "$file_path" 2>/dev/null)
     file_md5=${file_md5%% *}
@@ -107,7 +107,7 @@ print_file_metadata() {
         return 1
     fi
 
-    printf "%-40s %-24s %-8s %s\n" "$file_name" "$file_date" "$file_size" "$file_md5"
+    printf "%-40s %-17s %-10s %s\n" "$file_name" "$file_date" "$file_size" "$file_md5"
 }
 
 list_production_candidates() {
@@ -615,7 +615,7 @@ case "$COMMAND" in
         echo "STAGED USER FILES FOR: $USER"
         echo "-------------------------------------------------------------"
         if [ -z "$(ls -A "$USER_STAGING_DIR")" ]; then echo "Staging is empty."; exit 0; fi
-        printf "%-40s %-24s %-8s %s\n" "FILE" "DATE" "SIZE" "MD5SUM"
+        printf "%-40s %-17s %-10s %s\n" "FILE" "DATE" "SIZE" "MD5SUM"
         for path in "$USER_STAGING_DIR"/*; do
             [ -f "$path" ] || continue
             print_file_metadata "$path"
