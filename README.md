@@ -245,24 +245,25 @@ hw cmdline cat stage vic1
 # Seed and activate a staged cmdline from production
 hw cmdline seed vic1
 hw cmdline upload vic1 edited.cmdline
-hw cmdline activate stage vic1
+hw activate vic1 cmdline stage
 ```
 
-### Step 3: Switch Active Images (Optional)
-If you have multiple builds staged in your directory and want to change your active image choice:
+### Step 3: Switch Active Boot Artifacts (Optional)
+Each boot artifact (kernel, initrd, cmdline) can be activated independently, or all three at once:
 ```bash
-hw activate zImage-stable-backup
+# Flip all three artifacts for a host at once
+hw activate vic1 all prod
+hw activate vic1 all stage
 
-# Select the per-host boot source
-hw activate prod vic1
-hw activate stage vic1
+# Activate individual artifacts (mix-and-match prod/stage per artifact)
+hw activate vic1 kernel stage
+hw activate vic1 initrd prod
+hw activate vic1 cmdline stage my-cmdline.cfg
 
-# Select different staged kernel/initrd files per host
-hw activate stage vic1 zImage-vic1 initrd-vic1
-hw activate stage vic2 zImage-vic2 initrd-vic2
-
-# If multiple production images exist, rerun with explicit filenames
-hw activate prod vic1 vmlinuz.prodA initrd.img.prodA
+# Select a specific file when multiple exist (both prod and stage support [file])
+hw activate vic1 kernel prod vmlinuz-6.1
+hw activate vic1 kernel stage vmlinuz-mypatch
+hw activate vic1 initrd prod initrd.img.prodA
 ```
 
 ### Step 4: Acquire System Lock and Open Console
@@ -279,7 +280,7 @@ While keeping your console session running in one window, open a second terminal
 
 #### The Fast Workflow: Soft Rebooting (System is Responsive)
 If your target system is alive, responding to your console inputs, or accessible over the network, **do not use hardware power commands to cycle the machine**. Issuing an OS-level reboot is significantly faster and prevents filesystem corruption.
-1. Update your staged boot assets using `hw upload` or `hw activate`, or select `hw activate prod vic1` / `hw activate stage vic1` to choose the host boot source. If a host has multiple production images, rerun `hw activate prod <host> <kernel> <initrd>` with explicit filenames.
+1. Update your staged boot assets using `hw upload`, then run `hw activate vic1 all prod` or `hw activate vic1 all stage` to choose the host boot source. Each artifact (kernel, initrd, cmdline) can be activated independently — e.g. `hw activate vic1 kernel stage vmlinuz-mypatch`. If multiple files exist for an artifact, rerun with an explicit filename.
 2. Inside your active host terminal or over an SSH session, issue a standard software reboot:
    ```bash
    sudo reboot

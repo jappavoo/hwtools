@@ -50,7 +50,7 @@ sudo chmod 775 /srv/tftp/vic3
 sudo chmod 775 /srv/tftp/vic3/production
 ```
 
-Place production boot images in `/srv/tftp/vic3/production/`. If there is only one kernel/initrd pair, `hw activate prod vic3` will choose it automatically; if there are multiple, rerun with explicit filenames. A common naming pattern is `vmlinuz.prod`, `initrd.img.prod`, `vmlinuz.prodA`, `initrd.img.prodA`, etc.
+Place production boot images in `/srv/tftp/vic3/production/`. If there is only one kernel/initrd pair, `hw activate vic3 all prod` will choose it automatically; if there are multiple, rerun with explicit filenames — e.g. `hw activate vic3 kernel prod vmlinuz.prodA`. A common naming pattern is `vmlinuz.prod`, `initrd.img.prod`, `vmlinuz.prodA`, `initrd.img.prodA`, etc.
 
 For PXE command lines, use this tree:
 ```bash

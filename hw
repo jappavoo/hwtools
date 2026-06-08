@@ -294,6 +294,67 @@ list_production_candidates() {
     done
 }
 
+resolve_staged_image() {
+    local kind=$1
+    local requested=$2
+    local -a candidates=()
+    local path
+    local matched=0
+
+    if [ -n "$requested" ]; then
+        path="$USER_STAGING_DIR/$requested"
+        if [ ! -f "$path" ]; then
+            echo "Error: Staged $kind '$requested' not found."; exit 2
+        fi
+        printf '%s\n' "$path"
+        return 0
+    fi
+
+    shopt -s nullglob
+    case "$kind" in
+        kernel)
+            if [ -L "$USER_STAGING_DIR/vmlinuz" ]; then
+                path=$(readlink -f "$USER_STAGING_DIR/vmlinuz")
+                shopt -u nullglob
+                printf '%s\n' "$path"; return 0
+            fi
+            candidates=( "$USER_STAGING_DIR"/*vmlinuz* "$USER_STAGING_DIR"/*zImage* )
+            ;;
+        initrd)
+            if [ -L "$USER_STAGING_DIR/initrd.img" ]; then
+                path=$(readlink -f "$USER_STAGING_DIR/initrd.img")
+                shopt -u nullglob
+                printf '%s\n' "$path"; return 0
+            fi
+            candidates=( "$USER_STAGING_DIR"/*initrd* "$USER_STAGING_DIR"/*ramdisk* )
+            ;;
+    esac
+    shopt -u nullglob
+
+    for path in "${candidates[@]}"; do
+        [ -f "$path" ] || continue
+        matched=$((matched + 1))
+    done
+
+    if [ "$matched" -eq 1 ]; then
+        for path in "${candidates[@]}"; do
+            [ -f "$path" ] || continue
+            printf '%s\n' "$path"; return 0
+        done
+    fi
+
+    if [ "$matched" -gt 1 ]; then
+        echo "Available staged ${kind}s:"
+        for path in "${candidates[@]}"; do
+            [ -f "$path" ] || continue
+            echo "  ${path##*/}"
+        done
+        echo "Error: Multiple staged ${kind}s exist. Rerun with explicit filename."; exit 2
+    fi
+
+    echo "Error: No staged $kind images available."; exit 2
+}
+
 resolve_production_image() {
     local target_dir=$1
     local kind=$2
@@ -780,58 +841,61 @@ case "$COMMAND" in
         ;;
 
     activate)
-        TARGET_MODE="$2"
-        TARGET_ARG="$3"
-        TARGET_KERNEL="$4"
-        TARGET_INITRD="$5"
+        TARGET_HOST="$2"
+        TARGET_ARTIFACT="$3"
+        TARGET_SOURCE="$4"
+        TARGET_FILE="$5"
+
+        if [ -z "$TARGET_HOST" ] || [[ ! -v SYSTEM_TTY[$TARGET_HOST] ]]; then
+            echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
+        fi
+        if [[ "$TARGET_ARTIFACT" != "all"     && "$TARGET_ARTIFACT" != "kernel" && \
+              "$TARGET_ARTIFACT" != "initrd"   && "$TARGET_ARTIFACT" != "cmdline" ]]; then
+            echo "Error: Usage: hw activate <host> {all|kernel|initrd|cmdline} {prod|stage} [file]"; exit 2
+        fi
+        if [[ "$TARGET_SOURCE" != "prod" && "$TARGET_SOURCE" != "stage" ]]; then
+            echo "Error: Usage: hw activate <host> {all|kernel|initrd|cmdline} {prod|stage} [file]"; exit 2
+        fi
+
+        TFTP_PATH="${SYSTEM_TFTP[$TARGET_HOST]}"
         ensure_user_staging
-        if [ -z "$TARGET_MODE" ]; then
-            echo "Error: Target file not found."; exit 2
-        fi
-        if [[ "$TARGET_MODE" == "prod" || "$TARGET_MODE" == "stage" ]]; then
-            if [ -z "$TARGET_ARG" ] || [[ ! -v SYSTEM_TTY[$TARGET_ARG] ]]; then
-                echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
-            fi
-            TFTP_PATH="${SYSTEM_TFTP[$TARGET_ARG]}"
-            case "$TARGET_MODE" in
-                prod)
-                    PROD_KERNEL=$(resolve_production_image "$TFTP_PATH" kernel "$TARGET_KERNEL")
-                    PROD_INITRD=$(resolve_production_image "$TFTP_PATH" initrd "$TARGET_INITRD")
-                    ln -sf "$PROD_KERNEL" "$TFTP_PATH/vmlinuz"
-                    ln -sf "$PROD_INITRD" "$TFTP_PATH/initrd.img"
-                    echo "SUCCESS: Activated production boot images for '$TARGET_ARG'."
-                    ;;
-                stage)
-                    if [ -n "$TARGET_KERNEL" ] || [ -n "$TARGET_INITRD" ]; then
-                        if [ -z "$TARGET_KERNEL" ] || [ -z "$TARGET_INITRD" ]; then
-                            echo "Error: Specify both kernel and initrd staged filenames."; exit 2
-                        fi
-                        if [ ! -f "$USER_STAGING_DIR/$TARGET_KERNEL" ] || [ ! -f "$USER_STAGING_DIR/$TARGET_INITRD" ]; then
-                            echo "ERROR: Staged kernel or initrd file not found."; exit 2
-                        fi
-                        ln -sf "$USER_STAGING_DIR/$TARGET_KERNEL" "$TFTP_PATH/vmlinuz"
-                        ln -sf "$USER_STAGING_DIR/$TARGET_INITRD" "$TFTP_PATH/initrd.img"
-                        echo "SUCCESS: Activated staged boot images for '$TARGET_ARG' using '$TARGET_KERNEL' and '$TARGET_INITRD'."
-                    elif [ ! -L "$USER_STAGING_DIR/vmlinuz" ] || [ ! -L "$USER_STAGING_DIR/initrd.img" ]; then
-                        echo "ERROR: Missing active staging files."; exit 2
-                    else
-                        ln -sf "$USER_STAGING_DIR/vmlinuz" "$TFTP_PATH/vmlinuz"
-                        ln -sf "$USER_STAGING_DIR/initrd.img" "$TFTP_PATH/initrd.img"
-                        echo "SUCCESS: Activated staging boot images for '$TARGET_ARG'."
-                    fi
-                    ;;
+        ensure_pxe_tree
+
+        do_activate_kernel() {
+            local src=$1 file=$2 path
+            case "$src" in
+                prod)  path=$(resolve_production_image "$TFTP_PATH" kernel "$file") ;;
+                stage) path=$(resolve_staged_image kernel "$file") ;;
             esac
-        elif [ ! -f "$USER_STAGING_DIR/$TARGET_MODE" ]; then
-            echo "Error: Target file not found."; exit 2
-        elif [[ "$TARGET_MODE" == *"vmlinuz"* || "$TARGET_MODE" == *"zImage"* ]]; then
-            ln -sf "$USER_STAGING_DIR/$TARGET_MODE" "$USER_STAGING_DIR/vmlinuz"
-            echo "SUCCESS: Staging kernel link updated."
-        elif [[ "$TARGET_MODE" == *"initrd"* || "$TARGET_MODE" == *"ramdisk"* ]]; then
-            ln -sf "$USER_STAGING_DIR/$TARGET_MODE" "$USER_STAGING_DIR/initrd.img"
-            echo "SUCCESS: Staging initrd link updated."
-        else
-            echo "Error: File type ambiguous."; exit 2
-        fi
+            ln -sf "$path" "$TFTP_PATH/vmlinuz"
+            echo "SUCCESS: Activated $src kernel for '$TARGET_HOST'."
+        }
+
+        do_activate_initrd() {
+            local src=$1 file=$2 path
+            case "$src" in
+                prod)  path=$(resolve_production_image "$TFTP_PATH" initrd "$file") ;;
+                stage) path=$(resolve_staged_image initrd "$file") ;;
+            esac
+            ln -sf "$path" "$TFTP_PATH/initrd.img"
+            echo "SUCCESS: Activated $src initrd for '$TARGET_HOST'."
+        }
+
+        do_activate_cmdline() {
+            local src=$1 file=$2
+            set_active_pxe_target "$TARGET_HOST" "$src" "$file"
+        }
+
+        case "$TARGET_ARTIFACT" in
+            all)
+                do_activate_kernel  "$TARGET_SOURCE" ""
+                do_activate_initrd  "$TARGET_SOURCE" ""
+                do_activate_cmdline "$TARGET_SOURCE" ""
+                ;;
+            kernel)  do_activate_kernel  "$TARGET_SOURCE" "$TARGET_FILE" ;;
+            initrd)  do_activate_initrd  "$TARGET_SOURCE" "$TARGET_FILE" ;;
+            cmdline) do_activate_cmdline "$TARGET_SOURCE" "$TARGET_FILE" ;;
+        esac
         ;;
 
     cmdline)
@@ -943,30 +1007,8 @@ case "$COMMAND" in
                 cp "$CMD_SOURCE_FILE" "$PXE_CFG_DIR/users/$USER/$CMD_HOST/$CMD_DEST_FILE"
                 echo "SUCCESS: Uploaded staged cmdline '$CMD_DEST_FILE' for '$CMD_HOST'."
                 ;;
-            activate)
-                CMD_SOURCE="$3"
-                CMD_HOST="$4"
-                CMD_FILE="$5"
-                if [ -z "$CMD_SOURCE" ] || [ -z "$CMD_HOST" ]; then
-                    echo "Error: Usage: hw cmdline activate {prod|stage} <host> [file]"; exit 2
-                fi
-                if [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
-                    echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
-                fi
-                case "$CMD_SOURCE" in
-                    prod)
-                        set_active_pxe_target "$CMD_HOST" prod "$CMD_FILE"
-                        ;;
-                    stage)
-                        set_active_pxe_target "$CMD_HOST" stage "$CMD_FILE"
-                        ;;
-                    *)
-                        echo "Error: Usage: hw cmdline activate {prod|stage} <host> [file]"; exit 2
-                        ;;
-                esac
-                ;;
             *)
-                echo "Error: Usage: hw cmdline {ls|cat|seed|upload|activate} ..."; exit 2
+                echo "Error: Usage: hw cmdline {ls|cat|seed|upload} ..."; exit 2
                 ;;
         esac
         ;;
@@ -1072,7 +1114,7 @@ case "$COMMAND" in
 
         check_console_lock $SERIAL_DEV
         if [ ! -e "$TFTP_PATH/vmlinuz" ] || [ ! -e "$TFTP_PATH/initrd.img" ]; then
-            echo "ERROR: Missing active boot images. Use: hw activate stage|prod $SYS_NAME"; exit 2
+            echo "ERROR: Missing active boot images. Use: hw activate $SYS_NAME {kernel|initrd|all} {prod|stage} [file]"; exit 2
         fi
 
         case "$COMMAND" in
@@ -1131,10 +1173,8 @@ case "$COMMAND" in
         echo "  hw user {add|del} <name>              Manages user login and TFTP isolation profiles"
         echo "  hw upload <path>                      Stages custom build modules to user root"
         echo "  hw ls [stage|prod [host]]             Lists staged or production files"
-        echo "  hw cmdline {ls|cat|seed|upload|activate} ...  Manages PXE cmdline files"
-        echo "  hw activate <file>                    Changes current staging boot tracking assignment"
-        echo "  hw activate stage <host> [kernel initrd]   Selects staged boot source for a host"
-        echo "  hw activate prod <host> [kernel initrd]    Selects production boot source for a host"
+        echo "  hw cmdline {ls|cat|seed|upload} ...   Manages PXE cmdline files"
+        echo "  hw activate <host> {all|kernel|initrd|cmdline} {prod|stage} [file]  Activates boot artifact for a host"
         echo "  hw log [ls] <victim>                  Lists telemetry log sets"
         echo "  hw log cat <victim> [file]            Views target file output stream"
         echo "  hw log clean <victim> [days]          Prunes aged text logs"
