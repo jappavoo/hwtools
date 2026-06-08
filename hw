@@ -153,6 +153,25 @@ get_console_lock_owner() {
     printf '%s\n' "$lock_owner"
 }
 
+print_console_lock_status() {
+    local serial_dev=$1
+    local lock_pid
+    local lock_owner
+
+    lock_pid=$(get_console_lock_pid "$serial_dev")
+    if [ -z "$lock_pid" ]; then
+        echo "LOCK STATUS: [FREE]"
+        return 0
+    fi
+
+    lock_owner=$(get_console_lock_owner "$lock_pid")
+    if [ -z "$lock_owner" ]; then
+        echo "LOCK STATUS: [LOCKED] (pid $lock_pid)"
+    else
+        echo "LOCK STATUS: held by $lock_owner (pid $lock_pid)"
+    fi
+}
+
 check_console_lock() {
     local serial_dev=$1
     local active_user="${SUDO_USER:-$USER}"
@@ -230,7 +249,13 @@ case "$COMMAND" in
         echo "Connecting to $SYS_NAME console (/dev/$SERIAL_DEV via picocom)..."
         echo "Logging session output to: $LOG_FILE"
         sleep 1
-        exec picocom -b 115200 -f h -g "$LOG_FILE" /dev/"$SERIAL_DEV"
+        picocom -b 115200 -f h -g "$LOG_FILE" /dev/"$SERIAL_DEV"
+        PICOCOM_STATUS=$?
+        if [ "$PICOCOM_STATUS" -ne 0 ]; then
+            echo "ERROR: picocom exited with status $PICOCOM_STATUS."
+            print_console_lock_status "$SERIAL_DEV"
+        fi
+        exit "$PICOCOM_STATUS"
         ;;
 
     log)
