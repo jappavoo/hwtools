@@ -8,9 +8,9 @@ configdir=$scriptdir/config
 [[ -z $HEAD_NODE ]]        && [[ -a $configdir/HEAD_NODE ]]        && HEAD_NODE=$(cat $configdir/HEAD_NODE)
 [[ -z $GRP ]]              && [[ -a $configdir/GRP ]]              && GRP=$(cat $configdir/GRP)
 [[ -z $SECONDARY_GROUPS ]] && [[ -a $configdir/SECONDARY_GROUPS ]] && SECONDARY_GROUPS=$(cat $configdir/SECONDARY_GROUPS)
-: "${HEAD_NODE:=JA-HW-HEAD}"
-: "${GRP:=dialout}"
-: "${SECONDARY_GROUPS:=gpio}"
+HEAD_NODE="${HEAD_NODE:-JA-HW-HEAD}"
+GRP="${GRP:-dialout}"
+SECONDARY_GROUPS="${SECONDARY_GROUPS:-gpio}"
 
 # --- REMOTE WORKSTATION AUTO-DETECTION PHASE ---
 # Detect if we are running locally on the Raspberry Pi 4 
@@ -59,9 +59,9 @@ fi
 [[ -z $GPIO_CHIP ]]     && [[ -a $configdir/GPIO_CHIP ]]     && GPIO_CHIP=$(cat $configdir/GPIO_CHIP)
 [[ -z $BASE_TFTP_DIR ]] && [[ -a $configdir/BASE_TFTP_DIR ]] && BASE_TFTP_DIR=$(cat $configdir/BASE_TFTP_DIR)
 [[ -z $LOG_DIR ]]       && [[ -a $configdir/LOG_DIR ]]       && LOG_DIR=$(cat $configdir/LOG_DIR)
-: "${GPIO_CHIP:=gpiochip0}"
-: "${BASE_TFTP_DIR:=/srv/tftp}"
-: "${LOG_DIR:=/var/log/serial}"
+GPIO_CHIP="${GPIO_CHIP:-gpiochip0}"
+BASE_TFTP_DIR="${BASE_TFTP_DIR:-/srv/tftp}"
+LOG_DIR="${LOG_DIR:-/var/log/serial}"
 
 # HOST CONFIGURATION — sourced so adding a host only requires editing config/hosts
 declare -A SYSTEM_GPIO_OUT SYSTEM_GPIO_IN SYSTEM_TTY SYSTEM_TFTP SYSTEM_MAC
@@ -76,9 +76,9 @@ PXE_USER_DIR="$PXE_CFG_DIR/users/$USER"
 [[ -z $SOFT_OFF_TIMEOUT ]] && [[ -a $configdir/SOFT_OFF_TIMEOUT ]] && SOFT_OFF_TIMEOUT=$(cat $configdir/SOFT_OFF_TIMEOUT)
 [[ -z $HARD_OFF_TIMEOUT ]] && [[ -a $configdir/HARD_OFF_TIMEOUT ]] && HARD_OFF_TIMEOUT=$(cat $configdir/HARD_OFF_TIMEOUT)
 [[ -z $BOOT_TIMEOUT ]]     && [[ -a $configdir/BOOT_TIMEOUT ]]     && BOOT_TIMEOUT=$(cat $configdir/BOOT_TIMEOUT)
-: "${SOFT_OFF_TIMEOUT:=30}"
-: "${HARD_OFF_TIMEOUT:=10}"
-: "${BOOT_TIMEOUT:=15}"
+SOFT_OFF_TIMEOUT="${SOFT_OFF_TIMEOUT:-30}"
+HARD_OFF_TIMEOUT="${HARD_OFF_TIMEOUT:-10}"
+BOOT_TIMEOUT="${BOOT_TIMEOUT:-15}"
 # 2. INTERNAL ENVIRONMENT HELPERS
 USER_STAGING_DIR="$BASE_TFTP_DIR/users/$USER"
 
