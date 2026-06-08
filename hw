@@ -66,6 +66,97 @@ ensure_user_staging() {
     fi
 }
 
+list_production_candidates() {
+    local target_dir=$1
+    local kind=$2
+    local -a candidates=()
+    local path
+    local name
+
+    shopt -s nullglob
+    case "$kind" in
+        kernel)
+            candidates=( "$target_dir"/production/*vmlinuz* "$target_dir"/production/*zImage* )
+            ;;
+        initrd)
+            candidates=( "$target_dir"/production/*initrd* "$target_dir"/production/*ramdisk* )
+            ;;
+    esac
+    shopt -u nullglob
+
+    echo "Available production ${kind}s for $(basename "$target_dir"):"
+    for path in "${candidates[@]}"; do
+        [ -f "$path" ] || continue
+        name=${path##*/}
+        echo "  $name"
+    done
+}
+
+resolve_production_image() {
+    local target_dir=$1
+    local kind=$2
+    local requested=$3
+    local -a candidates=()
+    local path
+    local name
+    local matched=0
+
+    shopt -s nullglob
+    case "$kind" in
+        kernel)
+            candidates=( "$target_dir"/production/*vmlinuz* "$target_dir"/production/*zImage* )
+            ;;
+        initrd)
+            candidates=( "$target_dir"/production/*initrd* "$target_dir"/production/*ramdisk* )
+            ;;
+    esac
+    shopt -u nullglob
+
+    if [ -n "$requested" ]; then
+        path="$target_dir/production/$requested"
+        if [ ! -f "$path" ]; then
+            echo "Error: Production $kind '$requested' not found for $(basename "$target_dir")."
+            exit 2
+        fi
+        case "$kind" in
+            kernel)
+                if [[ "$requested" != *vmlinuz* && "$requested" != *zImage* ]]; then
+                    echo "Error: '$requested' is not a production kernel image."; exit 2
+                fi
+                ;;
+            initrd)
+                if [[ "$requested" != *initrd* && "$requested" != *ramdisk* ]]; then
+                    echo "Error: '$requested' is not a production initrd image."; exit 2
+                fi
+                ;;
+        esac
+        printf '%s\n' "$path"
+        return 0
+    fi
+
+    for path in "${candidates[@]}"; do
+        [ -f "$path" ] || continue
+        matched=$((matched + 1))
+    done
+
+    if [ "$matched" -eq 1 ]; then
+        for path in "${candidates[@]}"; do
+            [ -f "$path" ] || continue
+            printf '%s\n' "$path"
+            return 0
+        done
+    fi
+
+    if [ "$matched" -gt 1 ]; then
+        list_production_candidates "$target_dir" "$kind"
+        echo "Error: Multiple production ${kind}s exist for $(basename "$target_dir"). Rerun with explicit filenames."
+        exit 2
+    fi
+
+    echo "Error: No production $kind images are available for $(basename "$target_dir")."
+    exit 2
+}
+
 check_status() {
     local line_in=$1
     local current_state
@@ -465,16 +556,55 @@ case "$COMMAND" in
         ;;
 
     activate)
-        TARGET_FILE="$2"
+        TARGET_MODE="$2"
+        TARGET_ARG="$3"
+        TARGET_KERNEL="$4"
+        TARGET_INITRD="$5"
         ensure_user_staging
-        if [ -z "$TARGET_FILE" ] || [ ! -f "$USER_STAGING_DIR/$TARGET_FILE" ]; then
+        if [ -z "$TARGET_MODE" ]; then
             echo "Error: Target file not found."; exit 2
         fi
-        if [[ "$TARGET_FILE" == *"vmlinuz"* || "$TARGET_FILE" == *"zImage"* ]]; then
-            ln -sf "$USER_STAGING_DIR/$TARGET_FILE" "$USER_STAGING_DIR/vmlinuz"
+        if [[ "$TARGET_MODE" == "production" || "$TARGET_MODE" == "staging" ]]; then
+            if [ -z "$TARGET_ARG" ] || [[ ! -v SYSTEM_MAP[$TARGET_ARG] ]]; then
+                echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+            fi
+            PIN_CONFIG="${SYSTEM_MAP[$TARGET_ARG]}"
+            TFTP_PATH=$(echo "$PIN_CONFIG" | cut -d':' -f4)
+            case "$TARGET_MODE" in
+                production)
+                    PROD_KERNEL=$(resolve_production_image "$TFTP_PATH" kernel "$TARGET_KERNEL")
+                    PROD_INITRD=$(resolve_production_image "$TFTP_PATH" initrd "$TARGET_INITRD")
+                    ln -sf "$PROD_KERNEL" "$TFTP_PATH/vmlinuz"
+                    ln -sf "$PROD_INITRD" "$TFTP_PATH/initrd.img"
+                    echo "SUCCESS: Activated production boot images for '$TARGET_ARG'."
+                    ;;
+                staging)
+                    if [ -n "$TARGET_KERNEL" ] || [ -n "$TARGET_INITRD" ]; then
+                        if [ -z "$TARGET_KERNEL" ] || [ -z "$TARGET_INITRD" ]; then
+                            echo "Error: Specify both kernel and initrd staged filenames."; exit 2
+                        fi
+                        if [ ! -f "$USER_STAGING_DIR/$TARGET_KERNEL" ] || [ ! -f "$USER_STAGING_DIR/$TARGET_INITRD" ]; then
+                            echo "ERROR: Staged kernel or initrd file not found."; exit 2
+                        fi
+                        ln -sf "$USER_STAGING_DIR/$TARGET_KERNEL" "$TFTP_PATH/vmlinuz"
+                        ln -sf "$USER_STAGING_DIR/$TARGET_INITRD" "$TFTP_PATH/initrd.img"
+                        echo "SUCCESS: Activated staged boot images for '$TARGET_ARG' using '$TARGET_KERNEL' and '$TARGET_INITRD'."
+                    elif [ ! -L "$USER_STAGING_DIR/vmlinuz" ] || [ ! -L "$USER_STAGING_DIR/initrd.img" ]; then
+                        echo "ERROR: Missing active staging files."; exit 2
+                    else
+                        ln -sf "$USER_STAGING_DIR/vmlinuz" "$TFTP_PATH/vmlinuz"
+                        ln -sf "$USER_STAGING_DIR/initrd.img" "$TFTP_PATH/initrd.img"
+                        echo "SUCCESS: Activated staging boot images for '$TARGET_ARG'."
+                    fi
+                    ;;
+            esac
+        elif [ ! -f "$USER_STAGING_DIR/$TARGET_MODE" ]; then
+            echo "Error: Target file not found."; exit 2
+        elif [[ "$TARGET_MODE" == *"vmlinuz"* || "$TARGET_MODE" == *"zImage"* ]]; then
+            ln -sf "$USER_STAGING_DIR/$TARGET_MODE" "$USER_STAGING_DIR/vmlinuz"
             echo "SUCCESS: Staging kernel link updated."
-        elif [[ "$TARGET_FILE" == *"initrd"* || "$TARGET_FILE" == *"ramdisk"* ]]; then
-            ln -sf "$USER_STAGING_DIR/$TARGET_FILE" "$USER_STAGING_DIR/initrd.img"
+        elif [[ "$TARGET_MODE" == *"initrd"* || "$TARGET_MODE" == *"ramdisk"* ]]; then
+            ln -sf "$USER_STAGING_DIR/$TARGET_MODE" "$USER_STAGING_DIR/initrd.img"
             echo "SUCCESS: Staging initrd link updated."
         else
             echo "Error: File type ambiguous."; exit 2
@@ -581,10 +711,8 @@ case "$COMMAND" in
         fi
 
         check_console_lock $SERIAL_DEV
-        ensure_user_staging
-
-        if [ ! -L "$USER_STAGING_DIR/vmlinuz" ] || [ ! -L "$USER_STAGING_DIR/initrd.img" ]; then
-            echo "ERROR: Missing active staging files."; exit 2
+        if [ ! -e "$TFTP_PATH/vmlinuz" ] || [ ! -e "$TFTP_PATH/initrd.img" ]; then
+            echo "ERROR: Missing active boot images. Use: hw activate staging|production $SYS_NAME"; exit 2
         fi
 
         case "$COMMAND" in
@@ -592,8 +720,6 @@ case "$COMMAND" in
                 STATUS=$(check_status $LINE_IN)
                 if [ "$STATUS" == "ON" ]; then echo "SUCCESS: Already running."; exit 0; fi
                 if [ "$STATUS" == "UNKNOWN" ]; then echo "ERROR: Unable to read host power state."; exit 1; fi
-                ln -sf "$USER_STAGING_DIR/vmlinuz" "$TFTP_PATH/vmlinuz"
-                ln -sf "$USER_STAGING_DIR/initrd.img" "$TFTP_PATH/initrd.img"
                 if ! pulse_power_line "$LINE_OUT" 1; then
                     echo "ERROR: Unable to control power GPIO line."
                     exit 1
@@ -645,7 +771,9 @@ case "$COMMAND" in
         echo "  hw user {add|del} <name>              Manages user login and TFTP isolation profiles"
         echo "  hw upload <path>                      Stages custom build modules to user root"
         echo "  hw ls                                 Lists staged files and md5 sums"
-        echo "  hw activate <file>                    Changes current boot tracking assignment"
+        echo "  hw activate <file>                    Changes current staging boot tracking assignment"
+        echo "  hw activate staging <host> [kernel initrd] Selects staged boot source for a host"
+        echo "  hw activate production <host> [kernel initrd] Selects production boot source for a host"
         echo "  hw log [ls] <victim>                  Lists telemetry log sets"
         echo "  hw log cat <victim> [file]            Views target file output stream"
         echo "  hw log clean <victim> [days]          Prunes aged text logs"

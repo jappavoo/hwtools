@@ -40,10 +40,17 @@ Log into the Raspberry Pi 4 terminal and create the dedicated TFTP directory buc
 # Create the root TFTP boot folder for the new host
 sudo mkdir -p /srv/tftp/vic3
 
+# Each host gets a production slot that stores immutable boot images
+sudo mkdir -p /srv/tftp/vic3/production
+
 # Ensure group ownership and permissions inherit correctly
 sudo chown root:dialout /srv/tftp/vic3
+sudo chown root:dialout /srv/tftp/vic3/production
 sudo chmod 775 /srv/tftp/vic3
+sudo chmod 775 /srv/tftp/vic3/production
 ```
+
+Place production boot images in `/srv/tftp/vic3/production/`. If there is only one kernel/initrd pair, `hw activate production vic3` will choose it automatically; if there are multiple, rerun with explicit filenames. A common naming pattern is `vmlinuz.prod`, `initrd.img.prod`, `vmlinuz.prodA`, `initrd.img.prodA`, etc.
 
 ---
 

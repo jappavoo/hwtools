@@ -186,6 +186,17 @@ hw upload ~/src/linux/arch/arm/boot/zImage
 If you have multiple builds staged in your directory and want to change your active image choice:
 ```bash
 hw activate zImage-stable-backup
+
+# Select the per-host boot source
+hw activate production vic1
+hw activate staging vic1
+
+# Select different staged kernel/initrd files per host
+hw activate staging vic1 zImage-vic1 initrd-vic1
+hw activate staging vic2 zImage-vic2 initrd-vic2
+
+# If multiple production images exist, rerun with explicit filenames
+hw activate production vic1 vmlinuz.prodA initrd.img.prodA
 ```
 
 ### Step 4: Acquire System Lock and Open Console
@@ -202,7 +213,7 @@ While keeping your console session running in one window, open a second terminal
 
 #### The Fast Workflow: Soft Rebooting (System is Responsive)
 If your target system is alive, responding to your console inputs, or accessible over the network, **do not use hardware power commands to cycle the machine**. Issuing an OS-level reboot is significantly faster and prevents filesystem corruption.
-1. Update your staged boot assets using `hw upload` or `hw activate`.
+1. Update your staged boot assets using `hw upload` or `hw activate`, or select `hw activate production vic1` / `hw activate staging vic1` to choose the host boot source. If a host has multiple production images, rerun `hw activate production <host> <kernel> <initrd>` with explicit filenames.
 2. Inside your active host terminal or over an SSH session, issue a standard software reboot:
    ```bash
    sudo reboot
