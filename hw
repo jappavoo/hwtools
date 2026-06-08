@@ -68,8 +68,8 @@ ensure_user_staging() {
 check_status() {
     local line_in=$1
     local current_state
-    if ! current_state=$(gpioget --bias=pull-up -c "$GPIO_CHIP" "$line_in" 2>/dev/null); then
-        if ! current_state=$(gpioget --bias=pull-up "$GPIO_CHIP" "$line_in" 2>/dev/null); then
+    if ! current_state=$(gpioget --numeric --bias pull-up --chip "$GPIO_CHIP" "$line_in" 2>/dev/null); then
+        if ! current_state=$(gpioget --numeric --bias pull-up "$line_in" 2>/dev/null); then
             echo "UNKNOWN"
             return 1
         fi
