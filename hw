@@ -154,6 +154,47 @@ get_console_lock_owner() {
     printf '%s\n' "$lock_owner"
 }
 
+format_log_age() {
+    local file_mtime=$1
+    local now_epoch
+    local age_seconds
+    local days hours minutes
+    local parts=()
+
+    now_epoch=$(date +%s)
+    age_seconds=$((now_epoch - file_mtime))
+
+    if [ "$age_seconds" -lt 60 ]; then
+        printf '%ss\n' "$age_seconds"
+        return 0
+    fi
+
+    minutes=$((age_seconds / 60))
+    if [ "$minutes" -lt 60 ]; then
+        printf '%sm\n' "$minutes"
+        return 0
+    fi
+
+    hours=$((minutes / 60))
+    minutes=$((minutes % 60))
+    if [ "$hours" -lt 24 ]; then
+        if [ "$minutes" -gt 0 ]; then
+            printf '%sh%sm\n' "$hours" "$minutes"
+        else
+            printf '%sh\n' "$hours"
+        fi
+        return 0
+    fi
+
+    days=$((hours / 24))
+    hours=$((hours % 24))
+    if [ "$hours" -gt 0 ]; then
+        printf '%sd%sh\n' "$days" "$hours"
+    else
+        printf '%sd\n' "$days"
+    fi
+}
+
 print_console_lock_status() {
     local serial_dev=$1
     local lock_pid
@@ -295,8 +336,16 @@ case "$COMMAND" in
                 if [ ${#LOG_FILES[@]} -eq 0 ]; then
                     echo "No log files found for $SYS_NAME."; exit 0
                 fi
+                printf "%-40s %-10s %-8s\n" "LOG FILE" "AGE" "SIZE"
                 for log_path in "${LOG_FILES[@]}"; do
-                    printf '%s\n' "${log_path##*/}"
+                    log_name="${log_path##*/}"
+                    log_size=$(stat -c '%s' "$log_path" 2>/dev/null)
+                    log_mtime=$(stat -c '%Y' "$log_path" 2>/dev/null)
+                    if [ -z "$log_size" ] || [ -z "$log_mtime" ]; then
+                        continue
+                    fi
+                    log_age=$(format_log_age "$log_mtime")
+                    printf "%-40s %-10s %-8s\n" "$log_name" "$log_age" "$log_size"
                 done
                 ;;
             cat)
