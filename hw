@@ -120,26 +120,58 @@ wait_for_state() {
     return 1
 }
 
+get_console_lock_pid() {
+    local serial_dev=$1
+    local device="/dev/$serial_dev"
+    local resolved_device
+    local line
+    local pid
+    local locked_path
+
+    resolved_device=$(readlink -f "$device" 2>/dev/null || printf '%s' "$device")
+
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        set -- $line
+        pid=$1
+        locked_path=$2
+        if [ "$locked_path" = "$device" ] || [ "$locked_path" = "$resolved_device" ]; then
+            printf '%s\n' "$pid"
+            return 0
+        fi
+    done < <(lslocks --notruncate --noheadings -o PID,PATH 2>/dev/null)
+
+    return 1
+}
+
+get_console_lock_owner() {
+    local lock_pid=$1
+    local lock_owner
+
+    lock_owner=$(ps -o user= -p "$lock_pid" 2>/dev/null)
+    lock_owner=${lock_owner//[[:space:]]/}
+    printf '%s\n' "$lock_owner"
+}
+
 check_console_lock() {
     local serial_dev=$1
-    local lock_file="/var/lock/LCK..$serial_dev"
-    
-    if [ ! -f "$lock_file" ]; then
+    local active_user="${SUDO_USER:-$USER}"
+    local lock_pid
+    lock_pid=$(get_console_lock_pid "$serial_dev")
+
+    if [ -z "$lock_pid" ]; then
         echo "SECURITY ERROR: Control denied. You must open a console first."
         echo "Run: hw $SYS_NAME"
         exit 3
     fi
-    
-    local lock_pid
-    lock_pid=$(cat "$lock_file" | tr -d '[:space:]')
-    if [[ ! "$lock_pid" =~ ^[0-9]+$ ]] || ! kill -0 "$lock_pid" 2>/dev/null; then
-        echo "SECURITY ERROR: Stale or corrupt console lock file detected."
+
+    local lock_owner
+    lock_owner=$(get_console_lock_owner "$lock_pid")
+    if [ -z "$lock_owner" ]; then
+        echo "SECURITY ERROR: Console lock could not be resolved."
         exit 3
     fi
-    
-    local lock_owner
-    lock_owner=$(ps -o user= -p "$lock_pid" | tr -d '[:space:]')
-    if [ "$lock_owner" != "$USER" ]; then
+    if [ "$lock_owner" != "$active_user" ]; then
         echo "SECURITY ERROR: Control denied. Active lock is held by user '$lock_owner'."
         exit 3
     fi
@@ -172,13 +204,13 @@ if [ -z "$COMMAND" ]; then
         S_DEV=$(echo "$CONFIG" | cut -d':' -f3)
         
         CUR_STAT=$(check_status $L_IN)
-        LOCK_FILE="/var/lock/LCK..$S_DEV"
         HOLDER="[FREE]"
-        
-        if [ -f "$LOCK_FILE" ]; then
-            LPID=$(cat "$LOCK_FILE" | tr -d '[:space:]')
-            if kill -0 "$LPID" 2>/dev/null; then
-                HOLDER=$(ps -o user= -p "$LPID" | tr -d '[:space:]')
+
+        LPID=$(get_console_lock_pid "$S_DEV")
+        if [ -n "$LPID" ]; then
+            HOLDER=$(get_console_lock_owner "$LPID")
+            if [ -z "$HOLDER" ]; then
+                HOLDER="[LOCKED]"
             fi
         fi
         printf "%-12s %-8s %-12s %-12s\n" "$host" "$CUR_STAT" "/dev/$S_DEV" "$HOLDER"

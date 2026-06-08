@@ -193,7 +193,7 @@ To open a serial tunnel to a host machine, use the direct hostname shortcut:
 ```bash
 hw vic1
 ```
-*The Safety Interlock:* This shortcut launches `picocom -b 115200 -f h` on `/dev/ttyVIC1`. This creates a lock file (`/var/lock/LCK..ttyVIC1`) containing your terminal's Process ID (PID). You now hold the exclusive hardware lock for `vic1`. No other user can send power actions to this machine while your console window remains open.
+*The Safety Interlock:* This shortcut launches `picocom -b 115200 -f h` on `/dev/ttyVIC1`. `picocom` takes an advisory `flock` on the tty itself, and `hw` checks that tty lock before allowing power actions. You now hold the exclusive hardware lock for `vic1`. No other user can send power actions to this machine while your console window remains open.
 
 ### Step 5: Power Cycling and Controlling the Target
 Because the script tracks real-time voltage on the host's USB rails, it acts intelligently based on whether the machine is currently running or turned off. 
