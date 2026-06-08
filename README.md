@@ -67,7 +67,7 @@ The head is configured to run a network boot service and NAT on the private netw
 The following is the setup on the head node to initialize the filesystem structure and group privileges:
 
 `hw` uses `dialout` as the single access group registry.
-Users provisioned by `hw user add` are added only to `dialout`.
+Users provisioned by `hw user add` are added to `dialout` and `gpio`.
 
 ```bash
 # Create shared terminal logging environment

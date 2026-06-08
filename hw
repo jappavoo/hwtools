@@ -9,6 +9,7 @@ configdir=$scriptdir/config
 # Change this variable to match your Raspberry Pi's private network domain/IP
 HEAD_NODE="JA-HW-HEAD"
 GRP=dialout
+SECONDARY_GROUPS="gpio"
 
 # Detect if we are running locally on the Raspberry Pi 4 
 if [ ! -f /proc/device-tree/model ] || ! grep -q "Raspberry Pi" /proc/device-tree/model; then
@@ -386,7 +387,13 @@ case "$COMMAND" in
             passwd -l "$TARGET_USER" &>/dev/null
             
             # 3. Add user to the core lab peripheral access group.
-            usermod -aG "$GRP" "$TARGET_USER"
+            LAB_GROUPS="$GRP"
+            for extra_group in ${SECONDARY_GROUPS//,/ }; do
+                if [ "$extra_group" != "$GRP" ] && getent group "$extra_group" >/dev/null 2>&1; then
+                    LAB_GROUPS="$LAB_GROUPS,$extra_group"
+                fi
+            done
+            usermod -aG "$LAB_GROUPS" "$TARGET_USER"
             ensure_user_staging "$TARGET_USER"
             
             # 4. Generate the secure Ed25519 SSH Keypair inside a temporary location
