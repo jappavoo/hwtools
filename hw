@@ -372,62 +372,49 @@ case "$COMMAND" in
                     if [ ${#CLEAN_ARGS[@]} -eq 0 ]; then
                         echo "Error: Specify a log basename, a list of basenames, or re:<regex>."; exit 2
                     fi
-                    if [ ${#CLEAN_ARGS[@]} -eq 1 ] && [[ "${CLEAN_ARGS[0]}" != re:* ]]; then
-                        CLEAN_LOG="${CLEAN_ARGS[0]}"
-                        if [[ "$CLEAN_LOG" == *"/"* ]] || [[ "$CLEAN_LOG" != *.log ]] || [[ "$CLEAN_LOG" != *con.*.log ]]; then
-                            echo "Error: Invalid log file basename."; exit 2
-                        fi
-                        FULL_LOG_PATH="$LOG_DIR/$CLEAN_LOG"
-                        if [ ! -f "$FULL_LOG_PATH" ]; then
-                            echo "Error: Invalid log file path mapping."; exit 2
-                        fi
-                        rm -f "$FULL_LOG_PATH"
-                        echo "SUCCESS: Removed log file '$CLEAN_LOG'."
-                        exit 0
-                    fi
-                    if [[ "${CLEAN_ARGS[0]}" == re:* ]]; then
-                        if [ ${#CLEAN_ARGS[@]} -ne 1 ]; then
-                            echo "Error: Regex clean accepts exactly one re:<regex> argument."; exit 2
-                        fi
-                        CLEAN_REGEX="${CLEAN_ARGS[0]#re:}"
-                        MATCHES=()
-                        shopt -s nullglob
-                        for log_path in "$LOG_DIR"/*.log; do
-                            log_name="${log_path##*/}"
-                            if [[ "$log_name" =~ $CLEAN_REGEX ]]; then
-                                MATCHES+=( "$log_name" )
-                            fi
-                        done
-                        shopt -u nullglob
-                        if [ ${#MATCHES[@]} -eq 0 ]; then
-                            echo "No log files matched the regex."; exit 0
-                        fi
-                        echo "The following log files will be removed:"
-                        for log_name in "${MATCHES[@]}"; do
-                            echo "  $log_name"
-                        done
-                        read -r -p "Proceed? [y/N] " CONFIRM
-                        if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-                            echo "Aborted."
-                            exit 0
-                        fi
-                        for log_name in "${MATCHES[@]}"; do
-                            rm -f "$LOG_DIR/$log_name"
-                        done
-                        echo "SUCCESS: Removed ${#MATCHES[@]} log file(s)."
-                        exit 0
-                    fi
+
                     MATCHES=()
-                    for CLEAN_LOG in "${CLEAN_ARGS[@]}"; do
-                        if [[ "$CLEAN_LOG" == *"/"* ]] || [[ "$CLEAN_LOG" != *.log ]] || [[ "$CLEAN_LOG" != *con.*.log ]]; then
-                            echo "Error: Invalid log file basename: $CLEAN_LOG"; exit 2
+                    shopt -s nullglob
+                    LOG_FILES=( "$LOG_DIR"/*.log )
+                    shopt -u nullglob
+
+                    if [ ${#CLEAN_ARGS[@]} -eq 1 ]; then
+                        CLEAN_SPEC="${CLEAN_ARGS[0]}"
+                        if [[ "$CLEAN_SPEC" == re:* ]]; then
+                            CLEAN_REGEX="${CLEAN_SPEC#re:}"
+                            for log_path in "${LOG_FILES[@]}"; do
+                                log_name="${log_path##*/}"
+                                if [[ "$log_name" =~ $CLEAN_REGEX ]]; then
+                                    MATCHES+=( "$log_name" )
+                                fi
+                            done
+                        elif [[ "$CLEAN_SPEC" == *[\*\?\[]* ]]; then
+                            for log_path in "${LOG_FILES[@]}"; do
+                                log_name="${log_path##*/}"
+                                if [[ "$log_name" == $CLEAN_SPEC ]]; then
+                                    MATCHES+=( "$log_name" )
+                                fi
+                            done
+                        else
+                            if [[ "$CLEAN_SPEC" == *"/"* ]] || [[ "$CLEAN_SPEC" != *.log ]] || [[ "$CLEAN_SPEC" != *con.*.log ]]; then
+                                echo "Error: Invalid log file basename."; exit 2
+                            fi
+                            MATCHES+=( "$CLEAN_SPEC" )
                         fi
-                        FULL_LOG_PATH="$LOG_DIR/$CLEAN_LOG"
-                        if [ ! -f "$FULL_LOG_PATH" ]; then
-                            echo "Error: Invalid log file path mapping: $CLEAN_LOG"; exit 2
-                        fi
-                        MATCHES+=( "$CLEAN_LOG" )
-                    done
+                    else
+                        for CLEAN_LOG in "${CLEAN_ARGS[@]}"; do
+                            if [[ "$CLEAN_LOG" == *"/"* ]] || [[ "$CLEAN_LOG" != *.log ]] || [[ "$CLEAN_LOG" != *con.*.log ]]; then
+                                echo "Error: Invalid log file basename: $CLEAN_LOG"; exit 2
+                            fi
+                            MATCHES+=( "$CLEAN_LOG" )
+                        done
+                    fi
+
+                    if [ ${#MATCHES[@]} -eq 0 ]; then
+                        echo "No log files matched."
+                        exit 0
+                    fi
+
                     echo "The following log files will be removed:"
                     for log_name in "${MATCHES[@]}"; do
                         echo "  $log_name"

@@ -256,6 +256,7 @@ hw log clean vic1con.2026-06-08_08-00-00.log
 # Delete an explicit list of exact log files after confirmation
 hw log clean vic1con.2026-06-08_08-00-00.log vic2con.2026-06-08_08-00-00.log
 
-# Preview and confirm a regex match set before deleting
+# Preview and confirm a wildcard or regex match set before deleting
+hw log clean vic1con.2026-06-08_22*
 hw log clean re:vic1con.*\\.log
 ```
