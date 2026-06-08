@@ -1,16 +1,18 @@
 #!/bin/bash
-# Authored with Google Gemini
 (( HW_DEBUG )) && set -x
+set -o pipefail
 
-scriptdir=$(dirname $(realpath $0))
+scriptdir=$(dirname "$(realpath "$0")")
 configdir=$scriptdir/config
 
-# --- REMOTE WORKSTATION AUTO-DETECTION PHASE ---
-# Change this variable to match your Raspberry Pi's private network domain/IP
-HEAD_NODE="JA-HW-HEAD"
-GRP=dialout
-SECONDARY_GROUPS="gpio"
+[[ -z $HEAD_NODE ]]        && [[ -a $configdir/HEAD_NODE ]]        && HEAD_NODE=$(cat $configdir/HEAD_NODE)
+[[ -z $GRP ]]              && [[ -a $configdir/GRP ]]              && GRP=$(cat $configdir/GRP)
+[[ -z $SECONDARY_GROUPS ]] && [[ -a $configdir/SECONDARY_GROUPS ]] && SECONDARY_GROUPS=$(cat $configdir/SECONDARY_GROUPS)
+: "${HEAD_NODE:=JA-HW-HEAD}"
+: "${GRP:=dialout}"
+: "${SECONDARY_GROUPS:=gpio}"
 
+# --- REMOTE WORKSTATION AUTO-DETECTION PHASE ---
 # Detect if we are running locally on the Raspberry Pi 4 
 if [ ! -f /proc/device-tree/model ] || ! grep -q "Raspberry Pi" /proc/device-tree/model; then
     # We are running on a user's external workstation. 
@@ -47,33 +49,36 @@ if [ ! -f /proc/device-tree/model ] || ! grep -q "Raspberry Pi" /proc/device-tre
         exec ssh -q -t "${HEAD_NODE}" "hw"
     else
         # Forward shortcuts and power actions preserving the explicit username
-        exec ssh -q -t "${HEAD_NODE}" "hw $@"
+        exec ssh -q -t "${HEAD_NODE}" hw "$@"
     fi
     exit 0
 fi
 # --- END WORKSTATION REDIRECTION PHASE (Execution below only runs on the Pi) ---
 
 # 1. HARDWARE & PATH CONFIGURATION
-GPIO_CHIP="gpiochip0"
-BASE_TFTP_DIR="/srv/tftp"
-LOG_DIR="/var/log/serial"
+[[ -z $GPIO_CHIP ]]     && [[ -a $configdir/GPIO_CHIP ]]     && GPIO_CHIP=$(cat $configdir/GPIO_CHIP)
+[[ -z $BASE_TFTP_DIR ]] && [[ -a $configdir/BASE_TFTP_DIR ]] && BASE_TFTP_DIR=$(cat $configdir/BASE_TFTP_DIR)
+[[ -z $LOG_DIR ]]       && [[ -a $configdir/LOG_DIR ]]       && LOG_DIR=$(cat $configdir/LOG_DIR)
+: "${GPIO_CHIP:=gpiochip0}"
+: "${BASE_TFTP_DIR:=/srv/tftp}"
+: "${LOG_DIR:=/var/log/serial}"
 
-# ASSOCIATIVE ARRAY CONFIGURATION
-declare -A SYSTEM_MAP
-SYSTEM_MAP["vic1"]="18:24:ttyVIC1:$BASE_TFTP_DIR/vic1"
-SYSTEM_MAP["vic2"]="19:25:ttyVIC2:$BASE_TFTP_DIR/vic2"
-declare -A SYSTEM_MAC
-SYSTEM_MAC["vic1"]="01-64-00-6a-50-c4-3f"
-SYSTEM_MAC["vic2"]="01-64-00-6a-51-43-e0"
+# HOST CONFIGURATION — sourced so adding a host only requires editing config/hosts
+declare -A SYSTEM_GPIO_OUT SYSTEM_GPIO_IN SYSTEM_TTY SYSTEM_TFTP SYSTEM_MAC
+# shellcheck source=config/hosts
+source "$configdir/hosts"
 
 PXE_CFG_DIR="$BASE_TFTP_DIR/pxelinux.cfg"
 PXE_PROD_DIR="$PXE_CFG_DIR/production"
 PXE_USER_DIR="$PXE_CFG_DIR/users/$USER"
 
 # Operational Timeouts (Seconds)
-SOFT_OFF_TIMEOUT=30
-HARD_OFF_TIMEOUT=10
-BOOT_TIMEOUT=15
+[[ -z $SOFT_OFF_TIMEOUT ]] && [[ -a $configdir/SOFT_OFF_TIMEOUT ]] && SOFT_OFF_TIMEOUT=$(cat $configdir/SOFT_OFF_TIMEOUT)
+[[ -z $HARD_OFF_TIMEOUT ]] && [[ -a $configdir/HARD_OFF_TIMEOUT ]] && HARD_OFF_TIMEOUT=$(cat $configdir/HARD_OFF_TIMEOUT)
+[[ -z $BOOT_TIMEOUT ]]     && [[ -a $configdir/BOOT_TIMEOUT ]]     && BOOT_TIMEOUT=$(cat $configdir/BOOT_TIMEOUT)
+: "${SOFT_OFF_TIMEOUT:=30}"
+: "${HARD_OFF_TIMEOUT:=10}"
+: "${BOOT_TIMEOUT:=15}"
 # 2. INTERNAL ENVIRONMENT HELPERS
 USER_STAGING_DIR="$BASE_TFTP_DIR/users/$USER"
 
@@ -211,7 +216,7 @@ set_active_pxe_target() {
 
     ensure_pxe_tree
     mac=$(get_host_mac "$target_host") || {
-        echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"
+        echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"
         exit 2
     }
     target_path=$(resolve_pxe_candidate "$source_name" "$target_host" "$requested_file")
@@ -530,7 +535,7 @@ check_console_lock() {
 COMMAND="$1"
 
 # --- SHORTCUT GATING PHASE ---
-if [[ -v SYSTEM_MAP[$COMMAND] ]]; then
+if [[ -v SYSTEM_TTY[$COMMAND] ]]; then
     if [ -z "$2" ]; then
         SYS_NAME="$COMMAND"
         COMMAND="con"
@@ -547,10 +552,9 @@ if [ -z "$COMMAND" ]; then
     echo "============================================================="
     printf "%-12s %-8s %-12s %-12s\n" "HOST" "STATUS" "SERIAL PORT" "LOCK HOLDER"
     echo "-------------------------------------------------------------"
-    for host in "${!SYSTEM_MAP[@]}"; do
-        CONFIG="${SYSTEM_MAP[$host]}"
-        L_IN=$(echo "$CONFIG" | cut -d':' -f2)
-        S_DEV=$(echo "$CONFIG" | cut -d':' -f3)
+    for host in "${!SYSTEM_TTY[@]}"; do
+        L_IN="${SYSTEM_GPIO_IN[$host]}"
+        S_DEV="${SYSTEM_TTY[$host]}"
         
         CUR_STAT=$(check_status $L_IN)
         HOLDER="[FREE]"
@@ -569,10 +573,10 @@ fi
 case "$COMMAND" in
     con)
         if [ -z "$SYS_NAME" ]; then SYS_NAME="$2"; fi
-        if [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_MAP[$SYS_NAME] ]]; then
-            echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+        if [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_TTY[$SYS_NAME] ]]; then
+            echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
         fi
-        SERIAL_DEV=$(echo "${SYSTEM_MAP[$SYS_NAME]}" | cut -d':' -f3)
+        SERIAL_DEV="${SYSTEM_TTY[$SYS_NAME]}"
         TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
         LOG_FILE="$LOG_DIR/${SYS_NAME}con.${TIMESTAMP}.log"
         
@@ -608,8 +612,8 @@ case "$COMMAND" in
                 LOG_ARG="$3"
             fi
         fi
-        if [ "$SUB_CMD" != "clean" ] && { [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_MAP[$SYS_NAME] ]]; }; then
-            echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+        if [ "$SUB_CMD" != "clean" ] && { [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_TTY[$SYS_NAME] ]]; }; then
+            echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
         fi
         
         case "$SUB_CMD" in
@@ -752,12 +756,12 @@ case "$COMMAND" in
             echo "PRODUCTION BOOT FILES"
             echo "============================================================="
             if [ -n "$LS_HOST" ]; then
-                if [[ ! -v SYSTEM_MAP[$LS_HOST] ]]; then
-                    echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                if [[ ! -v SYSTEM_TTY[$LS_HOST] ]]; then
+                    echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
                 fi
                 list_host_production_files "$LS_HOST"
             else
-                for host in "${!SYSTEM_MAP[@]}"; do
+                for host in "${!SYSTEM_TTY[@]}"; do
                     list_host_production_files "$host"
                 done
             fi
@@ -785,11 +789,10 @@ case "$COMMAND" in
             echo "Error: Target file not found."; exit 2
         fi
         if [[ "$TARGET_MODE" == "prod" || "$TARGET_MODE" == "stage" ]]; then
-            if [ -z "$TARGET_ARG" ] || [[ ! -v SYSTEM_MAP[$TARGET_ARG] ]]; then
-                echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+            if [ -z "$TARGET_ARG" ] || [[ ! -v SYSTEM_TTY[$TARGET_ARG] ]]; then
+                echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
             fi
-            PIN_CONFIG="${SYSTEM_MAP[$TARGET_ARG]}"
-            TFTP_PATH=$(echo "$PIN_CONFIG" | cut -d':' -f4)
+            TFTP_PATH="${SYSTEM_TFTP[$TARGET_ARG]}"
             case "$TARGET_MODE" in
                 prod)
                     PROD_KERNEL=$(resolve_production_image "$TFTP_PATH" kernel "$TARGET_KERNEL")
@@ -847,11 +850,11 @@ case "$COMMAND" in
                     echo "============================================================="
                     if [ -n "$CMD_HOST" ]; then
                         if [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
-                            echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                            echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
                         fi
                         list_pxe_files prod "$CMD_HOST"
                     else
-                        for host in "${!SYSTEM_MAP[@]}"; do
+                        for host in "${!SYSTEM_TTY[@]}"; do
                             list_pxe_files prod "$host"
                         done
                     fi
@@ -861,11 +864,11 @@ case "$COMMAND" in
                     echo "============================================================="
                     if [ -n "$CMD_HOST" ]; then
                         if [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
-                            echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                            echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
                         fi
                         list_pxe_files stage "$CMD_HOST"
                     else
-                        for host in "${!SYSTEM_MAP[@]}"; do
+                        for host in "${!SYSTEM_TTY[@]}"; do
                             list_pxe_files stage "$host"
                         done
                     fi
@@ -881,7 +884,7 @@ case "$COMMAND" in
                     CMD_FILE="$4"
                 fi
                 if [ -z "$CMD_HOST" ] || [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
-                    echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                    echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
                 fi
                 case "$CMD_SOURCE" in
                     active)
@@ -909,7 +912,7 @@ case "$COMMAND" in
                 CMD_SOURCE_FILE="$4"
                 CMD_DEST_FILE="$5"
                 if [ -z "$CMD_HOST" ] || [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
-                    echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                    echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
                 fi
                 PROD_PATH=$(resolve_pxe_candidate prod "$CMD_HOST" "$CMD_SOURCE_FILE")
                 mkdir -p "$PXE_CFG_DIR/users/$USER/$CMD_HOST"
@@ -948,7 +951,7 @@ case "$COMMAND" in
                     echo "Error: Usage: hw cmdline activate {prod|stage} <host> [file]"; exit 2
                 fi
                 if [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
-                    echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                    echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
                 fi
                 case "$CMD_SOURCE" in
                     prod)
@@ -975,7 +978,9 @@ case "$COMMAND" in
             echo "============================================================="
             echo "LABORATORY ACCESS USERS ($GRP MEMBER REGISTRY)"
             echo "============================================================="
-            getent group $GRP | cut -d':' -f4 | tr ',' '\n'; exit 0
+            IFS=: read -r _ _ _ members < <(getent group "$GRP")
+            IFS=, read -ra member_list <<< "$members"
+            printf '%s\n' "${member_list[@]}"; exit 0
         fi
         if [[ "$USER_CMD" != "add" && "$USER_CMD" != "del" ]] || [ -z "$TARGET_USER" ]; then
             echo "Error: Invalid user syntax."; echo "Usage: hw user {add|del} <username>"; exit 2
@@ -1011,7 +1016,7 @@ case "$COMMAND" in
             ssh-keygen -t ed25519 -f "$TMP_KEY_DIR/id_ed25519" -N "" -q -C "$TARGET_USER@$(hostname)"
             
             # 5. Provision the user's local .ssh boundary structures inside their home directory
-            USER_HOME=$(eval echo "~$TARGET_USER")
+            IFS=: read -r _ _ _ _ _ USER_HOME _ < <(getent passwd "$TARGET_USER")
             mkdir -p "$USER_HOME/.ssh"
             cat "$TMP_KEY_DIR/id_ed25519" > "$USER_HOME/.ssh/id_ed25519"
             cat "$TMP_KEY_DIR/id_ed25519.pub" > "$USER_HOME/.ssh/id_ed25519.pub"
@@ -1052,15 +1057,13 @@ case "$COMMAND" in
 
     status|on|off|force-off)
         if [ -z "$SYS_NAME" ]; then SYS_NAME="$2"; fi
-        if [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_MAP[$SYS_NAME] ]]; then
+        if [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_TTY[$SYS_NAME] ]]; then
             echo "Error: Invalid host targets."; exit 2
         fi
-        
-        PIN_CONFIG="${SYSTEM_MAP[$SYS_NAME]}"
-        LINE_OUT=$(echo "$PIN_CONFIG" | cut -d':' -f1)
-        LINE_IN=$(echo "$PIN_CONFIG" | cut -d':' -f2)
-        SERIAL_DEV=$(echo "$PIN_CONFIG" | cut -d':' -f3)
-        TFTP_PATH=$(echo "$PIN_CONFIG" | cut -d':' -f4)
+        LINE_OUT="${SYSTEM_GPIO_OUT[$SYS_NAME]}"
+        LINE_IN="${SYSTEM_GPIO_IN[$SYS_NAME]}"
+        SERIAL_DEV="${SYSTEM_TTY[$SYS_NAME]}"
+        TFTP_PATH="${SYSTEM_TFTP[$SYS_NAME]}"
 
         if [ "$COMMAND" == "status" ]; then
             STATUS=$(check_status $LINE_IN)

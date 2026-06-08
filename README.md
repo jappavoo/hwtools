@@ -140,6 +140,38 @@ of the head node.  See Administrative command next for details.  Also if you don
 that has public access you can either use the vpn (in which case you won't need the ProxJump config) or talk
 to a lab member to help get you an account on a public BU server.
 
+### Configuration
+
+All deployment-specific settings live as plain text files in the `config/` directory next to the script. The priority order is:
+
+1. **Environment variable** — e.g. `HEAD_NODE=other-pi hw status vic1`
+2. **Config file** — `config/<VARNAME>` (one value per file, no trailing newline)
+3. **Hardcoded default** — the fallback baked into the script
+
+| File | Default | Description |
+|---|---|---|
+| `config/HEAD_NODE` | `JA-HW-HEAD` | SSH hostname of the Raspberry Pi head node |
+| `config/GRP` | `dialout` | Lab access group all users are added to |
+| `config/SECONDARY_GROUPS` | `gpio` | Additional groups for hardware access |
+| `config/GPIO_CHIP` | `gpiochip0` | GPIO chip name on the Pi |
+| `config/BASE_TFTP_DIR` | `/srv/tftp` | Root of the TFTP boot tree |
+| `config/LOG_DIR` | `/var/log/serial` | Console session log directory |
+| `config/SOFT_OFF_TIMEOUT` | `30` | Seconds to wait for graceful shutdown |
+| `config/HARD_OFF_TIMEOUT` | `10` | Seconds to wait after force-off pulse |
+| `config/BOOT_TIMEOUT` | `15` | Seconds to wait for host to reach ON state |
+
+To adapt the tooling for a different lab, edit the files in `config/` and commit — no script changes needed for these values.
+
+### Adding or Changing Hosts
+
+Host topology (GPIO pins, tty names, MAC addresses) lives in `config/hosts`, which is sourced as bash so no special parsing is required. To add a new victim, append one line:
+
+```bash
+SYSTEM_GPIO_OUT["vic3"]=20;  SYSTEM_GPIO_IN["vic3"]=21;  SYSTEM_TTY["vic3"]="ttyVIC3";  SYSTEM_TFTP["vic3"]="$BASE_TFTP_DIR/vic3";  SYSTEM_MAC["vic3"]="01-xx-xx-xx-xx-xx-xx"
+```
+
+`BASE_TFTP_DIR` is already resolved when `config/hosts` is sourced, so it expands correctly.
+
 ---
 
 ## 6. Administrative User Management Commands

@@ -1,0 +1,10 @@
+# Host configuration — sourced by hw after BASE_TFTP_DIR is set.
+# Add one line per host. Fields:
+#   SYSTEM_GPIO_OUT  GPIO output line number  (power button pulse)
+#   SYSTEM_GPIO_IN   GPIO input line number   (power status sense)
+#   SYSTEM_TTY       tty device name          (under /dev/)
+#   SYSTEM_TFTP      TFTP root for this host  (kernel/initrd live here)
+#   SYSTEM_MAC       PXE MAC address string   (01-xx-xx-xx-xx-xx-xx)
+
+SYSTEM_GPIO_OUT["vic1"]=18;  SYSTEM_GPIO_IN["vic1"]=24;  SYSTEM_TTY["vic1"]="ttyVIC1";  SYSTEM_TFTP["vic1"]="$BASE_TFTP_DIR/vic1";  SYSTEM_MAC["vic1"]="01-64-00-6a-50-c4-3f"
+SYSTEM_GPIO_OUT["vic2"]=19;  SYSTEM_GPIO_IN["vic2"]=25;  SYSTEM_TTY["vic2"]="ttyVIC2";  SYSTEM_TFTP["vic2"]="$BASE_TFTP_DIR/vic2";  SYSTEM_MAC["vic2"]="01-64-00-6a-51-43-e0"
