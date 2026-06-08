@@ -107,10 +107,10 @@ list_pxe_files() {
     local path
 
     case "$source_name" in
-        production)
+        prod)
             target_dir="$PXE_PROD_DIR/$target_host"
             ;;
-        staging)
+        stage)
             target_dir="$PXE_CFG_DIR/users/$USER/$target_host"
             ;;
         *)
@@ -121,7 +121,7 @@ list_pxe_files() {
     files=( "$target_dir"/* )
     shopt -u nullglob
 
-    if [ "$source_name" = "staging" ]; then
+    if [ "$source_name" = "stage" ]; then
         echo "STAGED CMDLINE FILES FOR: $target_host"
     else
         echo "PRODUCTION CMDLINE FILES FOR: $target_host"
@@ -148,10 +148,10 @@ resolve_pxe_candidate() {
     local count=0
 
     case "$source_name" in
-        production)
+        prod)
             target_dir="$PXE_PROD_DIR/$target_host"
             ;;
-        staging)
+        stage)
             target_dir="$PXE_CFG_DIR/users/$USER/$target_host"
             ;;
         *)
@@ -784,21 +784,21 @@ case "$COMMAND" in
         if [ -z "$TARGET_MODE" ]; then
             echo "Error: Target file not found."; exit 2
         fi
-        if [[ "$TARGET_MODE" == "production" || "$TARGET_MODE" == "staging" ]]; then
+        if [[ "$TARGET_MODE" == "prod" || "$TARGET_MODE" == "stage" ]]; then
             if [ -z "$TARGET_ARG" ] || [[ ! -v SYSTEM_MAP[$TARGET_ARG] ]]; then
                 echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
             fi
             PIN_CONFIG="${SYSTEM_MAP[$TARGET_ARG]}"
             TFTP_PATH=$(echo "$PIN_CONFIG" | cut -d':' -f4)
             case "$TARGET_MODE" in
-                production)
+                prod)
                     PROD_KERNEL=$(resolve_production_image "$TFTP_PATH" kernel "$TARGET_KERNEL")
                     PROD_INITRD=$(resolve_production_image "$TFTP_PATH" initrd "$TARGET_INITRD")
                     ln -sf "$PROD_KERNEL" "$TFTP_PATH/vmlinuz"
                     ln -sf "$PROD_INITRD" "$TFTP_PATH/initrd.img"
                     echo "SUCCESS: Activated production boot images for '$TARGET_ARG'."
                     ;;
-                staging)
+                stage)
                     if [ -n "$TARGET_KERNEL" ] || [ -n "$TARGET_INITRD" ]; then
                         if [ -z "$TARGET_KERNEL" ] || [ -z "$TARGET_INITRD" ]; then
                             echo "Error: Specify both kernel and initrd staged filenames."; exit 2
@@ -849,10 +849,10 @@ case "$COMMAND" in
                         if [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
                             echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
                         fi
-                        list_pxe_files production "$CMD_HOST"
+                        list_pxe_files prod "$CMD_HOST"
                     else
                         for host in "${!SYSTEM_MAP[@]}"; do
-                            list_pxe_files production "$host"
+                            list_pxe_files prod "$host"
                         done
                     fi
                 else
@@ -863,10 +863,10 @@ case "$COMMAND" in
                         if [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
                             echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
                         fi
-                        list_pxe_files staging "$CMD_HOST"
+                        list_pxe_files stage "$CMD_HOST"
                     else
                         for host in "${!SYSTEM_MAP[@]}"; do
-                            list_pxe_files staging "$host"
+                            list_pxe_files stage "$host"
                         done
                     fi
                 fi
@@ -892,11 +892,11 @@ case "$COMMAND" in
                         cat "$ACTIVE_PATH"
                         ;;
                     prod|production)
-                        PROD_PATH=$(resolve_pxe_candidate production "$CMD_HOST" "$CMD_FILE")
+                        PROD_PATH=$(resolve_pxe_candidate prod "$CMD_HOST" "$CMD_FILE")
                         cat "$PROD_PATH"
                         ;;
                     stage|staging)
-                        STAGE_PATH=$(resolve_pxe_candidate staging "$CMD_HOST" "$CMD_FILE")
+                        STAGE_PATH=$(resolve_pxe_candidate stage "$CMD_HOST" "$CMD_FILE")
                         cat "$STAGE_PATH"
                         ;;
                     *)
@@ -911,7 +911,7 @@ case "$COMMAND" in
                 if [ -z "$CMD_HOST" ] || [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
                     echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
                 fi
-                PROD_PATH=$(resolve_pxe_candidate production "$CMD_HOST" "$CMD_SOURCE_FILE")
+                PROD_PATH=$(resolve_pxe_candidate prod "$CMD_HOST" "$CMD_SOURCE_FILE")
                 mkdir -p "$PXE_CFG_DIR/users/$USER/$CMD_HOST"
                 if [ -z "$CMD_DEST_FILE" ]; then
                     CMD_DEST_FILE="${PROD_PATH##*/}"
@@ -945,20 +945,20 @@ case "$COMMAND" in
                 CMD_HOST="$4"
                 CMD_FILE="$5"
                 if [ -z "$CMD_SOURCE" ] || [ -z "$CMD_HOST" ]; then
-                    echo "Error: Usage: hw cmdline activate {production|staging} <host> [file]"; exit 2
+                    echo "Error: Usage: hw cmdline activate {prod|stage} <host> [file]"; exit 2
                 fi
                 if [[ ! -v SYSTEM_MAC[$CMD_HOST] ]]; then
                     echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
                 fi
                 case "$CMD_SOURCE" in
-                    production)
-                        set_active_pxe_target "$CMD_HOST" production "$CMD_FILE"
+                    prod)
+                        set_active_pxe_target "$CMD_HOST" prod "$CMD_FILE"
                         ;;
-                    staging)
-                        set_active_pxe_target "$CMD_HOST" staging "$CMD_FILE"
+                    stage)
+                        set_active_pxe_target "$CMD_HOST" stage "$CMD_FILE"
                         ;;
                     *)
-                        echo "Error: Usage: hw cmdline activate {production|staging} <host> [file]"; exit 2
+                        echo "Error: Usage: hw cmdline activate {prod|stage} <host> [file]"; exit 2
                         ;;
                 esac
                 ;;
@@ -1069,7 +1069,7 @@ case "$COMMAND" in
 
         check_console_lock $SERIAL_DEV
         if [ ! -e "$TFTP_PATH/vmlinuz" ] || [ ! -e "$TFTP_PATH/initrd.img" ]; then
-            echo "ERROR: Missing active boot images. Use: hw activate staging|production $SYS_NAME"; exit 2
+            echo "ERROR: Missing active boot images. Use: hw activate stage|prod $SYS_NAME"; exit 2
         fi
 
         case "$COMMAND" in
@@ -1130,8 +1130,8 @@ case "$COMMAND" in
         echo "  hw ls [stage|prod [host]]             Lists staged or production files"
         echo "  hw cmdline {ls|cat|seed|upload|activate} ...  Manages PXE cmdline files"
         echo "  hw activate <file>                    Changes current staging boot tracking assignment"
-        echo "  hw activate staging <host> [kernel initrd] Selects staged boot source for a host"
-        echo "  hw activate production <host> [kernel initrd] Selects production boot source for a host"
+        echo "  hw activate stage <host> [kernel initrd]   Selects staged boot source for a host"
+        echo "  hw activate prod <host> [kernel initrd]    Selects production boot source for a host"
         echo "  hw log [ls] <victim>                  Lists telemetry log sets"
         echo "  hw log cat <victim> [file]            Views target file output stream"
         echo "  hw log clean <victim> [days]          Prunes aged text logs"
