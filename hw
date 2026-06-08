@@ -1,9 +1,9 @@
 #!/bin/bash
 # Authored with Google Gemini
+(( HW_DEBUG )) && set -x
 
-# ================================================================================
-# HW: UNIFIED LAB POWER, CONSOLE, AND MULTI-MODE TFTP BOOT MANAGEMENT TOOL
-# ================================================================================
+scriptdir=$(dirname $(realpath $0))
+configdir=$scriptdir/config
 
 # --- REMOTE WORKSTATION AUTO-DETECTION PHASE ---
 # Change this variable to match your Raspberry Pi's private network domain/IP
