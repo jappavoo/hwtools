@@ -66,6 +66,29 @@ ensure_user_staging() {
     fi
 }
 
+list_host_production_files() {
+    local target_host=$1
+    local target_dir="$BASE_TFTP_DIR/$target_host/production"
+    local -a production_files=()
+    local path
+
+    shopt -s nullglob
+    production_files=( "$target_dir"/* )
+    shopt -u nullglob
+
+    echo "PRODUCTION FILES FOR: $target_host"
+    echo "-------------------------------------------------------------"
+    if [ ${#production_files[@]} -eq 0 ]; then
+        echo "No production files found."
+        return 0
+    fi
+
+    for path in "${production_files[@]}"; do
+        [ -e "$path" ] || continue
+        printf '%s\n' "${path##*/}"
+    done
+}
+
 list_production_candidates() {
     local target_dir=$1
     local kind=$2
@@ -545,6 +568,27 @@ case "$COMMAND" in
         ;;
 
     ls)
+        LS_MODE="${2:-stage}"
+        LS_HOST="$3"
+        if [ "$LS_MODE" != "stage" ] && [ "$LS_MODE" != "prod" ]; then
+            echo "Error: Usage: hw ls [stage|prod]"; exit 2
+        fi
+        if [ "$LS_MODE" = "prod" ]; then
+            echo "============================================================="
+            echo "PRODUCTION BOOT FILES"
+            echo "============================================================="
+            if [ -n "$LS_HOST" ]; then
+                if [[ ! -v SYSTEM_MAP[$LS_HOST] ]]; then
+                    echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
+                fi
+                list_host_production_files "$LS_HOST"
+            else
+                for host in "${!SYSTEM_MAP[@]}"; do
+                    list_host_production_files "$host"
+                done
+            fi
+            exit 0
+        fi
         ensure_user_staging
         echo "============================================================="
         echo "STAGED USER FILES FOR: $USER"

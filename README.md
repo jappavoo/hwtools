@@ -182,6 +182,21 @@ hw upload ~/src/linux/arch/arm/boot/zImage
 ```
 *Note: If the filename contains `vmlinuz` or `zImage`, the script automatically registers it as your active boot asset on upload.*
 
+### Step 2b: List Staging or Production Assets
+```bash
+# Default: list your staged files
+hw ls
+
+# Explicit staging view
+hw ls stage
+
+# Production files for all hosts
+hw ls prod
+
+# Production files for a single host
+hw ls prod vic1
+```
+
 ### Step 3: Switch Active Images (Optional)
 If you have multiple builds staged in your directory and want to change your active image choice:
 ```bash
