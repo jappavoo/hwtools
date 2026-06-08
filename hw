@@ -264,7 +264,11 @@ case "$COMMAND" in
         SYS_NAME="$3"
         LOG_ARG="$4"
         
-        if [ -z "$SUB_CMD" ] || [[ "$SUB_CMD" != "ls" && "$SUB_CMD" != "cat" && "$SUB_CMD" != "clean" ]]; then
+        if [ -z "$SUB_CMD" ]; then
+            SUB_CMD="ls"
+            SYS_NAME="$2"
+            LOG_ARG="$3"
+        elif [[ "$SUB_CMD" != "ls" && "$SUB_CMD" != "cat" && "$SUB_CMD" != "clean" ]]; then
             echo "Error: Invalid log command layout."; exit 2
         fi
         if [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_MAP[$SYS_NAME] ]]; then
@@ -275,20 +279,32 @@ case "$COMMAND" in
             ls)
                 echo "============================================================="
                 echo "AVAILABLE CONSOLE LOGS FOR HOST: $SYS_NAME"
+                echo "LOG DIRECTORY: $LOG_DIR"
                 echo "============================================================="
-                if [ -z "$(ls -A "$LOG_DIR"/${SYS_NAME}con.*.log 2>/dev/null)" ]; then
+                shopt -s nullglob
+                LOG_FILES=( "$LOG_DIR"/${SYS_NAME}con.*.log )
+                shopt -u nullglob
+                if [ ${#LOG_FILES[@]} -eq 0 ]; then
                     echo "No log files found for $SYS_NAME."; exit 0
                 fi
-                ls -lhrt "$LOG_DIR"/${SYS_NAME}con.*.log | awk '{print $5, $6, $7, $8, $9}'
+                for log_path in "${LOG_FILES[@]}"; do
+                    printf '%s\n' "${log_path##*/}"
+                done
                 ;;
             cat)
                 if [ -z "$LOG_ARG" ]; then
-                    LATEST_LOG=$(ls -t "$LOG_DIR"/${SYS_NAME}con.*.log 2>/dev/null | head -n 1)
-                    if [ -z "$LATEST_LOG" ]; then echo "Error: No logs exist for $SYS_NAME."; exit 1; fi
+                    shopt -s nullglob
+                    LOG_FILES=( "$LOG_DIR"/${SYS_NAME}con.*.log )
+                    shopt -u nullglob
+                    if [ ${#LOG_FILES[@]} -eq 0 ]; then echo "Error: No logs exist for $SYS_NAME."; exit 1; fi
+                    LATEST_LOG="${LOG_FILES[$((${#LOG_FILES[@]} - 1))]}"
                     cat "$LATEST_LOG"
                 else
+                    if [[ "$LOG_ARG" == *"/"* ]] || [[ "$LOG_ARG" != ${SYS_NAME}con.*.log ]]; then
+                        echo "Error: Invalid log file path mapping."; exit 2
+                    fi
                     FULL_LOG_PATH="$LOG_DIR/$LOG_ARG"
-                    if [ ! -f "$FULL_LOG_PATH" ] || [[ "$(basename "$FULL_LOG_PATH")" != "${SYS_NAME}con."* ]]; then
+                    if [ ! -f "$FULL_LOG_PATH" ]; then
                         echo "Error: Invalid log file path mapping."; exit 2
                     fi
                     cat "$FULL_LOG_PATH"
@@ -523,7 +539,7 @@ case "$COMMAND" in
         echo "  hw upload <path>                      Stages custom build modules to user root"
         echo "  hw ls                                 Lists staged files and md5 sums"
         echo "  hw activate <file>                    Changes current boot tracking assignment"
-        echo "  hw log ls <victim>                    Lists telemetry log sets"
+        echo "  hw log [ls] <victim>                  Lists telemetry log sets"
         echo "  hw log cat <victim> [file]            Views target file output stream"
         echo "  hw log clean <victim> [days]          Prunes aged text logs"
         echo "  hw <victim> {status|on|off|force-off} Control <victim> power state"

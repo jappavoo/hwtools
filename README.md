@@ -239,6 +239,9 @@ hw vic1 force-off
 The script auto-rotates and logs all serial communications to `/var/log/serial/`. Users can safely browse or audit session histories across the lab group:
 ```bash
 # List all generated logs for a specific host
+hw log vic1
+
+# Same as above, explicitly selecting the list subcommand
 hw log ls vic1
 
 # Read the contents of the absolute newest session trace
