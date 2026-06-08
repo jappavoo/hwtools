@@ -250,9 +250,12 @@ hw log cat vic1
 # Read a specific log file directly by basename
 hw log vic1con.2026-06-08_08-00-00.log
 
-# Delete console log traces older than a rolling 14-day threshold window
-hw log clean vic1 14
+# Delete one exact log file
+hw log clean vic1con.2026-06-08_08-00-00.log
 
-# Same as above, using a log basename to identify the host
-hw log clean vic1con.2026-06-08_08-00-00.log 14
+# Delete an explicit list of exact log files after confirmation
+hw log clean vic1con.2026-06-08_08-00-00.log vic2con.2026-06-08_08-00-00.log
+
+# Preview and confirm a regex match set before deleting
+hw log clean re:vic1con.*\\.log
 ```
