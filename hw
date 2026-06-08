@@ -27,8 +27,9 @@ if [ ! -f /proc/device-tree/model ] || ! grep -q "Raspberry Pi" /proc/device-tre
         echo "Transferring asset over private network to Pi staging zone..."
         
         # Connect using SSH host config mappings
-        scp "$LOCAL_FILE" "${HEAD_NODE}:/tmp/hw-upload-tmp" && \
-        ssh -q -t "${HEAD_NODE}" "hw upload /tmp/hw-upload-tmp $(basename "$LOCAL_FILE")"
+        REMOTE_TMP=$(ssh -q "${HEAD_NODE}" "mktemp /tmp/hw-upload-XXXXXX") || exit 1
+        scp "$LOCAL_FILE" "${HEAD_NODE}:${REMOTE_TMP}" && \
+        ssh -q -t "${HEAD_NODE}" "hw upload ${REMOTE_TMP} $(basename "$LOCAL_FILE")"
         exit $?
     elif [ "$COMMAND" == "cmdline" ] && [ "$2" == "upload" ]; then
         HOST="$3"
@@ -41,8 +42,9 @@ if [ ! -f /proc/device-tree/model ] || ! grep -q "Raspberry Pi" /proc/device-tre
             DEST_FILE="$(basename "$LOCAL_FILE")"
         fi
         echo "Transferring cmdline over private network to Pi staging zone..."
-        scp "$LOCAL_FILE" "${HEAD_NODE}:/tmp/hw-cmdline-upload-$(basename "$LOCAL_FILE")" && \
-        ssh -q -t "${HEAD_NODE}" "hw cmdline upload $HOST /tmp/hw-cmdline-upload-$(basename "$LOCAL_FILE") $DEST_FILE"
+        REMOTE_TMP=$(ssh -q "${HEAD_NODE}" "mktemp /tmp/hw-cmdline-XXXXXX") || exit 1
+        scp "$LOCAL_FILE" "${HEAD_NODE}:${REMOTE_TMP}" && \
+        ssh -q -t "${HEAD_NODE}" hw cmdline upload "$HOST" "$REMOTE_TMP" "$DEST_FILE"
         exit $?
     elif [ "$COMMAND" == "cat" ]; then
         # No -t: stdout must be a clean byte stream for binary kernel/initrd files
@@ -73,7 +75,6 @@ source "$configdir/hosts"
 
 PXE_CFG_DIR="$BASE_TFTP_DIR/pxelinux.cfg"
 PXE_PROD_DIR="$PXE_CFG_DIR/production"
-PXE_USER_DIR="$PXE_CFG_DIR/users/$USER"
 
 # Operational Timeouts (Seconds)
 [[ -z $SOFT_OFF_TIMEOUT ]] && [[ -a $configdir/SOFT_OFF_TIMEOUT ]] && SOFT_OFF_TIMEOUT=$(cat $configdir/SOFT_OFF_TIMEOUT)
@@ -173,7 +174,7 @@ resolve_pxe_candidate() {
     if [ -n "$requested_file" ]; then
         path="$target_dir/$requested_file"
         if [ ! -f "$path" ]; then
-            echo "Error: Cmdline file '$requested_file' not found for '$target_host' ($source_name)."
+            echo "Error: Cmdline file '$requested_file' not found for '$target_host' ($source_name)." >&2
             exit 2
         fi
         printf '%s\n' "$path"
@@ -194,12 +195,12 @@ resolve_pxe_candidate() {
     fi
 
     if [ "$count" -gt 1 ]; then
-        list_pxe_files "$source_name" "$target_host"
-        echo "Error: Multiple cmdline files exist for '$target_host' ($source_name). Rerun with explicit filename."
+        list_pxe_files "$source_name" "$target_host" >&2
+        echo "Error: Multiple cmdline files exist for '$target_host' ($source_name). Rerun with explicit filename." >&2
         exit 2
     fi
 
-    echo "Error: No cmdline files are available for '$target_host' ($source_name)."
+    echo "Error: No cmdline files are available for '$target_host' ($source_name)." >&2
     exit 2
 }
 
@@ -307,7 +308,7 @@ resolve_staged_image() {
     if [ -n "$requested" ]; then
         path="$USER_STAGING_DIR/$requested"
         if [ ! -f "$path" ]; then
-            echo "Error: Staged $kind '$requested' not found."; exit 2
+            echo "Error: Staged $kind '$requested' not found." >&2; exit 2
         fi
         printf '%s\n' "$path"
         return 0
@@ -347,15 +348,15 @@ resolve_staged_image() {
     fi
 
     if [ "$matched" -gt 1 ]; then
-        echo "Available staged ${kind}s:"
+        echo "Available staged ${kind}s:" >&2
         for path in "${candidates[@]}"; do
             [ -f "$path" ] || continue
-            echo "  ${path##*/}"
+            echo "  ${path##*/}" >&2
         done
-        echo "Error: Multiple staged ${kind}s exist. Rerun with explicit filename."; exit 2
+        echo "Error: Multiple staged ${kind}s exist. Rerun with explicit filename." >&2; exit 2
     fi
 
-    echo "Error: No staged $kind images available."; exit 2
+    echo "Error: No staged $kind images available." >&2; exit 2
 }
 
 resolve_production_image() {
@@ -381,18 +382,18 @@ resolve_production_image() {
     if [ -n "$requested" ]; then
         path="$target_dir/production/$requested"
         if [ ! -f "$path" ]; then
-            echo "Error: Production $kind '$requested' not found for $(basename "$target_dir")."
+            echo "Error: Production $kind '$requested' not found for $(basename "$target_dir")." >&2
             exit 2
         fi
         case "$kind" in
             kernel)
                 if [[ "$requested" != *vmlinuz* && "$requested" != *zImage* ]]; then
-                    echo "Error: '$requested' is not a production kernel image."; exit 2
+                    echo "Error: '$requested' is not a production kernel image." >&2; exit 2
                 fi
                 ;;
             initrd)
                 if [[ "$requested" != *initrd* && "$requested" != *ramdisk* ]]; then
-                    echo "Error: '$requested' is not a production initrd image."; exit 2
+                    echo "Error: '$requested' is not a production initrd image." >&2; exit 2
                 fi
                 ;;
         esac
@@ -414,12 +415,12 @@ resolve_production_image() {
     fi
 
     if [ "$matched" -gt 1 ]; then
-        list_production_candidates "$target_dir" "$kind"
-        echo "Error: Multiple production ${kind}s exist for $(basename "$target_dir"). Rerun with explicit filenames."
+        list_production_candidates "$target_dir" "$kind" >&2
+        echo "Error: Multiple production ${kind}s exist for $(basename "$target_dir"). Rerun with explicit filenames." >&2
         exit 2
     fi
 
-    echo "Error: No production $kind images are available for $(basename "$target_dir")."
+    echo "Error: No production $kind images are available for $(basename "$target_dir")." >&2
     exit 2
 }
 
@@ -798,7 +799,13 @@ case "$COMMAND" in
         if [ -n "$ALT_NAME" ]; then FILENAME="$ALT_NAME"; else FILENAME=$(basename "$FILE_PATH"); fi
         TARGET_DEST="$USER_STAGING_DIR/$FILENAME"
         
-        mv "$FILE_PATH" "$TARGET_DEST" 2>/dev/null || cp "$FILE_PATH" "$TARGET_DEST"
+        if mv "$FILE_PATH" "$TARGET_DEST" 2>/dev/null; then
+            : # same filesystem fast path
+        elif cp "$FILE_PATH" "$TARGET_DEST"; then
+            rm -f "$FILE_PATH" 2>/dev/null
+        else
+            echo "Error: Failed to stage '$FILENAME'."; exit 1
+        fi
         echo "Uploaded and staged: $FILENAME"
         
         if [ ! -L "$USER_STAGING_DIR/vmlinuz" ] && [[ "$FILENAME" == *"vmlinuz"* || "$FILENAME" == *"zImage"* ]]; then
@@ -835,9 +842,12 @@ case "$COMMAND" in
         echo "============================================================="
         echo "STAGED USER FILES FOR: $USER"
         echo "-------------------------------------------------------------"
-        if [ -z "$(ls -A "$USER_STAGING_DIR")" ]; then echo "Staging is empty."; exit 0; fi
+        shopt -s nullglob
+        staged_files=( "$USER_STAGING_DIR"/* )
+        shopt -u nullglob
+        if [ ${#staged_files[@]} -eq 0 ]; then echo "Staging is empty."; exit 0; fi
         printf "%-40s %-17s %-10s %s\n" "FILE" "DATE" "SIZE" "MD5SUM"
-        for path in "$USER_STAGING_DIR"/*; do
+        for path in "${staged_files[@]}"; do
             [ -f "$path" ] || continue
             print_file_metadata "$path"
         done
@@ -850,13 +860,13 @@ case "$COMMAND" in
         CAT_FILE="$5"
 
         if [ -z "$CAT_HOST" ] || [[ ! -v SYSTEM_TTY[$CAT_HOST] ]]; then
-            echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
+            echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}" >&2; exit 2
         fi
         if [[ "$CAT_ARTIFACT" != "kernel" && "$CAT_ARTIFACT" != "initrd" && "$CAT_ARTIFACT" != "cmdline" ]]; then
-            echo "Error: Usage: hw cat <host> {kernel|initrd|cmdline} [active|prod|stage] [file]"; exit 2
+            echo "Error: Usage: hw cat <host> {kernel|initrd|cmdline} [active|prod|stage] [file]" >&2; exit 2
         fi
         if [[ "$CAT_SOURCE" != "active" && "$CAT_SOURCE" != "prod" && "$CAT_SOURCE" != "stage" ]]; then
-            echo "Error: Usage: hw cat <host> {kernel|initrd|cmdline} [active|prod|stage] [file]"; exit 2
+            echo "Error: Usage: hw cat <host> {kernel|initrd|cmdline} [active|prod|stage] [file]" >&2; exit 2
         fi
 
         TFTP_PATH="${SYSTEM_TFTP[$CAT_HOST]}"
@@ -864,7 +874,6 @@ case "$COMMAND" in
 
         case "$CAT_ARTIFACT" in
             kernel|initrd)
-                ensure_user_staging
                 case "$CAT_SOURCE" in
                     active)
                         case "$CAT_ARTIFACT" in
@@ -872,7 +881,7 @@ case "$COMMAND" in
                             initrd) local_path="$TFTP_PATH/initrd.img" ;;
                         esac
                         if [ ! -e "$local_path" ]; then
-                            echo "Error: No active $CAT_ARTIFACT for '$CAT_HOST'."; exit 2
+                            echo "Error: No active $CAT_ARTIFACT for '$CAT_HOST'." >&2; exit 2
                         fi
                         ;;
                     prod)  local_path=$(resolve_production_image "$TFTP_PATH" "$CAT_ARTIFACT" "$CAT_FILE") ;;
@@ -885,7 +894,7 @@ case "$COMMAND" in
                     active)
                         local_path=$(get_active_pxe_target "$CAT_HOST")
                         if [ ! -f "$local_path" ]; then
-                            echo "Error: No active cmdline for '$CAT_HOST'."; exit 2
+                            echo "Error: No active cmdline for '$CAT_HOST'." >&2; exit 2
                         fi
                         ;;
                     prod)  local_path=$(resolve_pxe_candidate prod "$CAT_HOST" "$CAT_FILE") ;;
@@ -944,9 +953,23 @@ case "$COMMAND" in
 
         case "$TARGET_ARTIFACT" in
             all)
-                do_activate_kernel  "$TARGET_SOURCE" ""
-                do_activate_initrd  "$TARGET_SOURCE" ""
-                do_activate_cmdline "$TARGET_SOURCE" ""
+                # Resolve all three paths before touching any symlink so a
+                # resolution failure leaves the host in a consistent state.
+                local all_kernel all_initrd all_cmdline all_mac
+                case "$TARGET_SOURCE" in
+                    prod)  all_kernel=$(resolve_production_image "$TFTP_PATH" kernel "") ;;
+                    stage) all_kernel=$(resolve_staged_image kernel "") ;;
+                esac
+                case "$TARGET_SOURCE" in
+                    prod)  all_initrd=$(resolve_production_image "$TFTP_PATH" initrd "") ;;
+                    stage) all_initrd=$(resolve_staged_image initrd "") ;;
+                esac
+                all_cmdline=$(resolve_pxe_candidate "$TARGET_SOURCE" "$TARGET_HOST" "")
+                all_mac=$(get_host_mac "$TARGET_HOST") || { echo "Error: No MAC for '$TARGET_HOST'." >&2; exit 2; }
+                ln -sf "$all_kernel"  "$TFTP_PATH/vmlinuz"
+                ln -sf "$all_initrd"  "$TFTP_PATH/initrd.img"
+                ln -sf "$all_cmdline" "$PXE_CFG_DIR/$all_mac"
+                echo "SUCCESS: Activated $TARGET_SOURCE kernel, initrd, and cmdline for '$TARGET_HOST'."
                 ;;
             kernel)  do_activate_kernel  "$TARGET_SOURCE" "$TARGET_FILE" ;;
             initrd)  do_activate_initrd  "$TARGET_SOURCE" "$TARGET_FILE" ;;
