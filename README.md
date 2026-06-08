@@ -196,6 +196,8 @@ hw ls prod
 # Production files for a single host
 hw ls prod vic1
 ```
+Listings now show file date, size, and md5sum.
+`hw ls` defaults to `stage`.
 
 ### Step 3: Switch Active Images (Optional)
 If you have multiple builds staged in your directory and want to change your active image choice:
