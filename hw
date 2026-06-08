@@ -269,7 +269,9 @@ case "$COMMAND" in
             SYS_NAME="$2"
             LOG_ARG="$3"
         elif [[ "$SUB_CMD" != "ls" && "$SUB_CMD" != "cat" && "$SUB_CMD" != "clean" ]]; then
-            echo "Error: Invalid log command layout."; exit 2
+            SYS_NAME="$SUB_CMD"
+            SUB_CMD="ls"
+            LOG_ARG="$3"
         fi
         if [ -z "$SYS_NAME" ] || [[ ! -v SYSTEM_MAP[$SYS_NAME] ]]; then
             echo "Error: Specify a valid target system: ${!SYSTEM_MAP[@]}"; exit 2
