@@ -97,9 +97,11 @@ ensure_user_staging() {
 }
 
 ensure_pxe_tree() {
-    mkdir -p "$PXE_PROD_DIR" "$PXE_CFG_DIR/users/$USER"
-    chmod 755 "$PXE_CFG_DIR/users" "$PXE_CFG_DIR/users/$USER" 2>/dev/null
-    chgrp "$GRP" "$PXE_CFG_DIR/users" "$PXE_CFG_DIR/users/$USER" 2>/dev/null
+    # Production dir requires root; user dir was pre-created at hw user add time
+    sudo mkdir -p "$PXE_PROD_DIR" 2>/dev/null
+    mkdir -p "$PXE_CFG_DIR/users/$USER"
+    chmod 755 "$PXE_CFG_DIR/users/$USER" 2>/dev/null
+    chgrp "$GRP" "$PXE_CFG_DIR/users/$USER" 2>/dev/null
 }
 
 tftp_install_file() {
@@ -1182,6 +1184,11 @@ case "$COMMAND" in
             done
             usermod -aG "$LAB_GROUPS" "$TARGET_USER"
             ensure_user_staging "$TARGET_USER"
+            # Pre-create user's PXE cmdline staging dir (parent is root-owned, needs sudo)
+            PXE_USER_STAGE="$PXE_CFG_DIR/users/$TARGET_USER"
+            mkdir -p "$PXE_USER_STAGE"
+            chown "$TARGET_USER:$GRP" "$PXE_USER_STAGE"
+            chmod 755 "$PXE_USER_STAGE"
             
             # 4. Generate the secure Ed25519 SSH Keypair inside a temporary location
             TMP_KEY_DIR=$(mktemp -d)
@@ -1223,6 +1230,7 @@ case "$COMMAND" in
             if ! id "$TARGET_USER" &>/dev/null; then echo "Error: User does not exist."; exit 1; fi
             userdel -r "$TARGET_USER" 2>/dev/null
             rm -rf "$BASE_TFTP_DIR/users/$TARGET_USER"
+            rm -rf "$PXE_CFG_DIR/users/$TARGET_USER"
             echo "SUCCESS: Purged user account and staging folders for '$TARGET_USER'."
         fi
         ;;
