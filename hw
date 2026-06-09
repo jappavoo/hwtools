@@ -92,12 +92,24 @@ ensure_user_staging() {
     if [ ! -d "$target_dir" ]; then
         sudo mkdir -p "$target_dir"
         sudo chown "$target_user:$GRP" "$target_dir"
-        sudo chmod 770 "$target_dir"
+        sudo chmod 755 "$target_dir"
     fi
 }
 
 ensure_pxe_tree() {
     mkdir -p "$PXE_PROD_DIR" "$PXE_CFG_DIR/users/$USER"
+    chmod 755 "$PXE_CFG_DIR/users" "$PXE_CFG_DIR/users/$USER" 2>/dev/null
+    chgrp "$GRP" "$PXE_CFG_DIR/users" "$PXE_CFG_DIR/users/$USER" 2>/dev/null
+}
+
+tftp_install_file() {
+    chmod 644 "$1" 2>/dev/null
+    chgrp "$GRP" "$1" 2>/dev/null
+}
+
+tftp_install_dir() {
+    chmod 755 "$1" 2>/dev/null
+    chgrp "$GRP" "$1" 2>/dev/null
 }
 
 get_host_mac() {
@@ -796,6 +808,7 @@ case "$COMMAND" in
         else
             echo "Error: Failed to stage '$FILENAME'."; exit 1
         fi
+        tftp_install_file "$TARGET_DEST"
         echo "Uploaded and staged: $FILENAME"
         
         if [ ! -L "$USER_STAGING_DIR/vmlinuz" ] && [[ "$FILENAME" == *"vmlinuz"* || "$FILENAME" == *"zImage"* ]]; then
@@ -1049,10 +1062,12 @@ case "$COMMAND" in
                 fi
                 PROD_PATH=$(resolve_pxe_candidate prod "$CMD_HOST" "$CMD_SOURCE_FILE")
                 mkdir -p "$PXE_CFG_DIR/users/$USER/$CMD_HOST"
+                tftp_install_dir "$PXE_CFG_DIR/users/$USER/$CMD_HOST"
                 if [ -z "$CMD_DEST_FILE" ]; then
                     CMD_DEST_FILE="${PROD_PATH##*/}"
                 fi
                 cp "$PROD_PATH" "$PXE_CFG_DIR/users/$USER/$CMD_HOST/$CMD_DEST_FILE"
+                tftp_install_file "$PXE_CFG_DIR/users/$USER/$CMD_HOST/$CMD_DEST_FILE"
                 echo "SUCCESS: Seeded staged cmdline '$CMD_DEST_FILE' for '$CMD_HOST'."
                 ;;
             upload)
@@ -1067,6 +1082,7 @@ case "$COMMAND" in
                 fi
                 ensure_user_staging
                 mkdir -p "$PXE_CFG_DIR/users/$USER/$CMD_HOST"
+                tftp_install_dir "$PXE_CFG_DIR/users/$USER/$CMD_HOST"
                 if [ -z "$CMD_DEST_FILE" ]; then
                     CMD_DEST_FILE="${CMD_SOURCE_FILE##*/}"
                 fi
@@ -1074,6 +1090,7 @@ case "$COMMAND" in
                     echo "Error: Destination filename must not include a path."; exit 2
                 fi
                 cp "$CMD_SOURCE_FILE" "$PXE_CFG_DIR/users/$USER/$CMD_HOST/$CMD_DEST_FILE"
+                tftp_install_file "$PXE_CFG_DIR/users/$USER/$CMD_HOST/$CMD_DEST_FILE"
                 echo "SUCCESS: Uploaded staged cmdline '$CMD_DEST_FILE' for '$CMD_HOST'."
                 ;;
             *)
