@@ -819,6 +819,50 @@ case "$COMMAND" in
         fi
         ;;
 
+    rm)
+        RM_ARTIFACT="$2"
+        if [ -z "$RM_ARTIFACT" ]; then
+            echo "Error: Usage: hw rm <file>  |  hw rm cmdline <host> <file>"; exit 2
+        fi
+
+        if [ "$RM_ARTIFACT" = "cmdline" ]; then
+            RM_HOST="$3"
+            RM_FILE="$4"
+            if [ -z "$RM_HOST" ] || [[ ! -v SYSTEM_MAC[$RM_HOST] ]]; then
+                echo "Error: Specify a valid target system: ${!SYSTEM_TTY[@]}"; exit 2
+            fi
+            if [ -z "$RM_FILE" ]; then
+                echo "Error: Usage: hw rm cmdline <host> <file>"; exit 2
+            fi
+            if [[ "$RM_FILE" == *"/"* ]]; then
+                echo "Error: Filename must not include a path."; exit 2
+            fi
+            RM_PATH="$PXE_CFG_DIR/users/$USER/$RM_HOST/$RM_FILE"
+            if [ ! -f "$RM_PATH" ]; then
+                echo "Error: Staged cmdline '$RM_FILE' not found for '$RM_HOST'."; exit 2
+            fi
+            rm -f "$RM_PATH"
+            echo "SUCCESS: Removed staged cmdline '$RM_FILE' for '$RM_HOST'."
+        else
+            if [[ "$RM_ARTIFACT" == *"/"* ]]; then
+                echo "Error: Filename must not include a path."; exit 2
+            fi
+            ensure_user_staging
+            RM_PATH="$USER_STAGING_DIR/$RM_ARTIFACT"
+            if [ ! -f "$RM_PATH" ]; then
+                echo "Error: Staged file '$RM_ARTIFACT' not found."; exit 2
+            fi
+            rm -f "$RM_PATH"
+            echo "SUCCESS: Removed staged file '$RM_ARTIFACT'."
+            # Warn if a staging symlink is now dangling
+            for link in vmlinuz initrd.img; do
+                if [ -L "$USER_STAGING_DIR/$link" ] && [ ! -e "$USER_STAGING_DIR/$link" ]; then
+                    echo "WARNING: Staging symlink '$link' is now dangling. Update with: hw activate <host> $link stage <file>"
+                fi
+            done
+        fi
+        ;;
+
     ls)
         LS_MODE="${2:-stage}"
         LS_HOST="$3"
@@ -1258,6 +1302,8 @@ case "$COMMAND" in
         echo "  hw user                               Lists users with lab access group permissions"
         echo "  hw user {add|del} <name>              Manages user login and TFTP isolation profiles"
         echo "  hw upload <path>                      Stages custom build modules to user root"
+        echo "  hw rm <file>                          Removes a staged file"
+        echo "  hw rm cmdline <host> <file>           Removes a staged cmdline file"
         echo "  hw ls [stage|prod [host]]             Lists staged or production files"
         echo "  hw cat <host> {kernel|initrd|cmdline} [active|prod|stage] [file]  Outputs artifact (redirect for binary)"
         echo "  hw cmdline {ls|cat|seed|upload} ...   Manages PXE cmdline files"
