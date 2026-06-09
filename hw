@@ -811,10 +811,10 @@ case "$COMMAND" in
         tftp_install_file "$TARGET_DEST"
         echo "Uploaded and staged: $FILENAME"
         
-        if [ ! -L "$USER_STAGING_DIR/vmlinuz" ] && [[ "$FILENAME" == *"vmlinuz"* || "$FILENAME" == *"zImage"* ]]; then
+        if [ "$FILENAME" != "vmlinuz" ] && [ ! -L "$USER_STAGING_DIR/vmlinuz" ] && [[ "$FILENAME" == *"vmlinuz"* || "$FILENAME" == *"zImage"* ]]; then
             ln -sf "$TARGET_DEST" "$USER_STAGING_DIR/vmlinuz"
         fi
-        if [ ! -L "$USER_STAGING_DIR/initrd.img" ] && [[ "$FILENAME" == *"initrd"* || "$FILENAME" == *"ramdisk"* ]]; then
+        if [ "$FILENAME" != "initrd.img" ] && [ ! -L "$USER_STAGING_DIR/initrd.img" ] && [[ "$FILENAME" == *"initrd"* || "$FILENAME" == *"ramdisk"* ]]; then
             ln -sf "$TARGET_DEST" "$USER_STAGING_DIR/initrd.img"
         fi
         ;;
