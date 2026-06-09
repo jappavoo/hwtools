@@ -448,18 +448,9 @@ check_status() {
 
 pulse_power_line() {
     local line_out=$1
-    local hold_seconds=$2
-
-    if ! gpioset -c "$GPIO_CHIP" "$line_out=1" 2>/dev/null; then
-        if ! gpioset "$GPIO_CHIP" "$line_out=1" 2>/dev/null; then
-            return 1
-        fi
-    fi
-
-    sleep "$hold_seconds"
-
-    if ! gpioset -c "$GPIO_CHIP" "$line_out=0" 2>/dev/null; then
-        if ! gpioset "$GPIO_CHIP" "$line_out=0" 2>/dev/null; then
+    local duration=$2
+    if ! gpioset --chip "$GPIO_CHIP" --toggle "${duration}s,0" "$line_out"=1 2>/dev/null; then
+        if ! gpioset --toggle "${duration}s,0" "$line_out"=1 2>/dev/null; then
             return 1
         fi
     fi
