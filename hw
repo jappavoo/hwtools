@@ -474,22 +474,21 @@ get_console_lock_pid() {
     local serial_dev=$1
     local device="/dev/$serial_dev"
     local resolved_device
-    local line
+    local device_inode
     local pid
-    local locked_path
+    local dev_info
+    local lock_inode
 
     resolved_device=$(readlink -f "$device" 2>/dev/null || printf '%s' "$device")
+    device_inode=$(stat -c '%i' "$resolved_device" 2>/dev/null) || return 1
 
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        set -- $line
-        pid=$1
-        locked_path=$2
-        if [ "$locked_path" = "$device" ] || [ "$locked_path" = "$resolved_device" ]; then
+    while read -r _ _ _ _ pid dev_info _rest; do
+        lock_inode=${dev_info##*:}
+        if [ "$lock_inode" = "$device_inode" ]; then
             printf '%s\n' "$pid"
             return 0
         fi
-    done < <(lslocks --notruncate --noheadings -o PID,PATH 2>/dev/null)
+    done < /proc/locks
 
     return 1
 }
