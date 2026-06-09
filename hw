@@ -1228,10 +1228,13 @@ case "$COMMAND" in
             
         elif [ "$USER_CMD" == "del" ]; then
             if ! id "$TARGET_USER" &>/dev/null; then echo "Error: User does not exist."; exit 1; fi
-            userdel -r "$TARGET_USER" 2>/dev/null
+            if ! userdel -r "$TARGET_USER"; then
+                echo "Warning: userdel reported an error (user may have active processes or a remote home dir)."
+                echo "         Linux account may not have been fully removed — check with: id $TARGET_USER"
+            fi
             rm -rf "$BASE_TFTP_DIR/users/$TARGET_USER"
             rm -rf "$PXE_CFG_DIR/users/$TARGET_USER"
-            echo "SUCCESS: Purged user account and staging folders for '$TARGET_USER'."
+            echo "SUCCESS: Purged staging folders for '$TARGET_USER'."
         fi
         ;;
 
