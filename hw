@@ -97,8 +97,7 @@ ensure_user_staging() {
 }
 
 ensure_pxe_tree() {
-    # Production dir requires root; user dir was pre-created at hw user add time
-    sudo mkdir -p "$PXE_PROD_DIR" 2>/dev/null
+    # User pxelinux.cfg dir is pre-created owned by the user at hw user add time
     mkdir -p "$PXE_CFG_DIR/users/$USER"
     chmod 755 "$PXE_CFG_DIR/users/$USER" 2>/dev/null
     chgrp "$GRP" "$PXE_CFG_DIR/users/$USER" 2>/dev/null
