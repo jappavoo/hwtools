@@ -109,9 +109,13 @@ sudo ln -s hwtools/hw /usr/local/bin/hw
    ```
    
 2. Configure your local SSH client configuration file (`~/.ssh/config`) on your workstation to automatically map your personal identity key and user ID whenever you talk to the head node and victims.
-   The following are example stanza's from my ssh config.  You will need to adjust as needed
+   The following are example stanza's from my ssh config.  You will need to adjust as needed.  Note the below requires you to create the directory `~/.ssh/sockets` (`mkdir -p ~/.ssh/sockets`).
+   
    ```text
    Host JA-HW-HEAD ja-hw-head head
+     ControlMaster auto
+     ControlPath ~/.ssh/sockets/%r@%h:%p
+     ControlPersist 10m
      TCPKeepAlive yes
      ServerAliveInterval 30
      Hostname <external IP of head>
